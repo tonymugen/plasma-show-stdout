@@ -1,0 +1,1 @@
+This is a plasmoid that displays text output from shell scripts. These scripts are included via a configuration panel. They can run on a timer or be activated from other processes via `RTMIN`. Each script is run on its own thread from a back end implemented in C++-17.

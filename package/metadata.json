@@ -1,0 +1,23 @@
+{
+	"KPlugin": {
+		"Id": "com.github.tonymugen.plasma-show-stdout",
+		"Name": "show-stdout",
+		"Description": "Display output from shell scripts",
+		"Version": "1.0",
+		"Category": "System Information",
+		"Icon": "applications-system",
+		"Authors": [
+			{
+				"Name": "Anthony Greenberg",
+				"Email": "info@bayesicresearch.org"
+			}
+		],
+		"License": "BSD-3-Clause",
+		"Website": "https://github.com/tonymugen/plasma-show-stdout",
+		"ServiceTypes": [
+			"Plasma/Applet"
+		]
+	},
+	"X-Plasma-API": "declarativeappletscript",
+	"X-Plasma-MainScript": "ui/main.qml"
+}
