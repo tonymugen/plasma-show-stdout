@@ -4,6 +4,7 @@ project(plasma-show-stdout
 	LANGUAGES CXX
 )
 include(CheckCXXCompilerFlag)
+include(FetchContent)
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 if (NOT DEFINED CMAKE_CXX_STANDARD)
@@ -70,19 +71,37 @@ else()
 	message(AUTHOR_WARNING "No compiler warnings set for CXX compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
 
-find_package(ECM 1.4.0 REQUIRED NO_MODULE)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
+find_package(ECM 1.4.0 QUIET NO_MODULE)
+if(NOT ECM_FOUND)
+	FetchContent_Declare(
+		ECM
+		GIT_REPOSITORY https://invent.kde.org/frameworks/extra-cmake-modules.git
+		GIT_TAG        v6.0.0
+		GIT_SHALLOW    TRUE
+		GIT_PROGRESS   TRUE
+	)
+	FetchContent_MakeAvailable(ECM)
+	set(CMAKE_MODULE_PATH
+		"${ecm_SOURCE_DIR}/modules"
+		"${ecm_BINARY_DIR}/modules"
+		"${ecm_SOURCE_DIR}/find-modules"
+		"${ecm_BINARY_DIR}/find-modules"
+		${CMAKE_MODULE_PATH}
+	)
+else()
+	set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
+endif()
 
-include(KDEInstallDirs)
+include(KDEInstallDirs6)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
-find_package(Qt5 REQUIRED COMPONENTS
+find_package(Qt6 REQUIRED COMPONENTS
 	Core
 	Qml
 )
 
-find_package(KF5 REQUIRED COMPONENTS
+find_package(KF6 REQUIRED COMPONENTS
 	Plasma # Required for cmake plasma_install_package()
 	# I18n
 )
@@ -108,10 +127,12 @@ target_link_libraries(plasma_show_stdout
 install(
 	TARGETS plasma_show_stdout
 	DESTINATION ${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasma-show-stdout
+	COMPONENT plasmoid
 )
 install(
 	FILES plugin/qmldir
 	DESTINATION ${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasma-show-stdout
+	COMPONENT plasmoid
 )
 #
 # Tests with Catch2
@@ -176,7 +197,7 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTS)
 		plugin/tests/tests.cpp
 	)
 	target_link_libraries(tests
-		PRIVATE plasma-show-stdout
+		PRIVATE plasma_show_stdout
 		PRIVATE Catch2::Catch2WithMain
 	)
 	target_include_directories(tests

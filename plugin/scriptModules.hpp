@@ -23,7 +23,7 @@
  * \copyright Copyright (c) 2026 Anthony J. Greenberg
  * \version 0.1.0
  *
- * API definitions for managing named shell script execution.
+ * API definitions to manage named shell script execution.
  */
 
 #pragma once
@@ -32,8 +32,17 @@
 #include <condition_variable>
 #include <chrono>
 #include <memory>
+#include <filesystem>
 
 namespace PSSspace {
+	/** \brief Run a script once.
+	 *
+	 * Runs a shell script and return the output.
+	 *
+	 * \param[in] script path to the script
+	 * \return string output
+	 */
+	[[nodiscard]] std::string runScript(const std::filesystem::path &script);
 	/** \brief A module executed on a timer.
 	 *
 	 * Executes a shell script on a timer.
@@ -46,19 +55,19 @@ namespace PSSspace {
 		 *
 		 * \param[in] executionInterval refresh interval
 		 * \param[in] signalOnChange condition variable to notify main thread that an execution happened
-		 * \param[in] scriptName shell script name
+		 * \param[in] script path to the shell script
 		 * \param[in] outputLengthLimit limit on output string length
 		 * \param[in] outputTarget pointer to the target string
 		 */
 		TimedModule(
 			const std::chrono::duration<uint32_t> &executionInterval,
 			std::unique_ptr<std::condition_variable> signalOnChange,
-			const std::string &scriptName,
+			const std::filesystem::path &script,
 			const size_t &outputLengthLimit,
 			std::unique_ptr<std::string> outputTarget
 		) : refreshInterval_{executionInterval},
 			signalToMain_{std::move(signalOnChange)},
-			scriptName_{scriptName},
+			script_{script},
 			outputLengthLimit_{outputLengthLimit},
 			outputString_{std::move(outputTarget)} {};
 		/** \brief Move constructor
@@ -84,8 +93,8 @@ namespace PSSspace {
 		std::chrono::duration<uint32_t> refreshInterval_;
 		/** \brief Condition variable pointer to signal state change */
 		std::unique_ptr<std::condition_variable> signalToMain_;
-		/** \brief Script name */
-		std::string scriptName_;
+		/** \brief Path to the script */
+		std::filesystem::path script_;
 		/** \brief Output length limit */
 		size_t outputLengthLimit_ = 0;
 		/** \brief Pointer to the output string */
@@ -103,19 +112,19 @@ namespace PSSspace {
 		 *
 		 * \param[in] signalToExecute condition variable to wait on
 		 * \param[in] signalOnChange condition variable to notify main thread that an execution happened
-		 * \param[in] scriptName shell script name
+		 * \param[in] script path to the shell script
 		 * \param[in] outputLengthLimit limit on output string length
 		 * \param[in] outputTarget pointer to the target string
 		 */
 		SignalModule(
 			std::unique_ptr<std::condition_variable> signalToExecute,
 			std::unique_ptr<std::condition_variable> signalOnChange,
-			const std::string &scriptName,
+			const std::filesystem::path &script,
 			const size_t &outputLengthLimit,
 			std::unique_ptr<std::string> &outputTarget
 		) : executionSignal_{std::move(signalToExecute)},
 			signalToMain_{std::move(signalOnChange)},
-			scriptName_{scriptName},
+			script_{script},
 			outputLengthLimit_{outputLengthLimit},
 			outputString_{std::move(outputTarget)} {};
 		/** \brief Move constructor
@@ -141,8 +150,8 @@ namespace PSSspace {
 		std::unique_ptr<std::condition_variable> executionSignal_;
 		/** \brief Condition variable pointer to signal state change */
 		std::unique_ptr<std::condition_variable> signalToMain_;
-		/** \brief Script name */
-		std::string scriptName_;
+		/** \brief Path to the script */
+		std::filesystem::path script_;
 		/** \brief Output length limit */
 		size_t outputLengthLimit_ = 0;
 		/** \brief Pointer to the output string */

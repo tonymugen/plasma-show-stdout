@@ -17,4 +17,75 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/// Modules that run shell scripts
+/** \file
+ * \author Anthony J. Greenberg
+ * \copyright Copyright (c) 2026 Anthony J. Greenberg
+ * \version 0.1.0
+ *
+ * Implementation of methods to manage named shell script execution.
+ */
+
+#include <cstdio>
+#include <string>
+#include <filesystem>
+#include <chrono>
+#include <thread>
+#include <mutex>
+
 #include "scriptModules.hpp"
+
+using namespace PSSspace;
+
+std::string PSSspace::runScript(const std::filesystem::path &script) {
+	// errors will be reported via output
+	// so the user can see if something went wrong
+	if ( !std::filesystem::exists(script) ) {
+		return script.string() + " does not exist";
+	}
+
+	constexpr size_t bufferSize = 100;
+	char buffer[bufferSize];
+	std::string output;
+	FILE *pipe = popen(script.c_str(), "r");
+	if (!pipe) {
+		return "Failed to execute " + script.string();
+	}
+	while ( !feof(pipe) ) {
+		if (fgets(buffer, bufferSize, pipe) != NULL) {
+			output += buffer;
+		}
+	}
+	pclose(pipe);
+	return output;
+}
+
+void TimedModule::operator()() const {
+	std::mutex mtx;
+	while (true) {
+		std::string rawOutput = runScript(script_);
+		if (rawOutput.size() > outputLengthLimit_) {
+			rawOutput.erase( rawOutput.begin() + outputLengthLimit_, rawOutput.end() );
+		}
+		std::unique_lock<std::mutex> lock(mtx);
+		*outputString_ = std::move(rawOutput);
+		signalToMain_->notify_one();
+		lock.unlock();
+		std::this_thread::sleep_for(refreshInterval_);
+	}
+}
+
+void SignalModule::operator()() const {
+	std::mutex mtx;
+	while (true) {
+		std::unique_lock<std::mutex> lock(mtx);
+		executionSignal_->wait(lock);
+		std::string rawOutput = runScript(script_);
+		if (rawOutput.size() > outputLengthLimit_) {
+			rawOutput.erase( rawOutput.begin() + outputLengthLimit_, rawOutput.end() );
+		}
+		*outputString_ = std::move(rawOutput);
+		signalToMain_->notify_one();
+		lock.unlock();
+	}
+}
