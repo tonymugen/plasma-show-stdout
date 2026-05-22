@@ -80,31 +80,54 @@ if(NOT ECM_FOUND)
 		GIT_SHALLOW    TRUE
 		GIT_PROGRESS   TRUE
 	)
-	FetchContent_MakeAvailable(ECM)
-	set(CMAKE_MODULE_PATH
-		"${ecm_SOURCE_DIR}/modules"
-		"${ecm_BINARY_DIR}/modules"
-		"${ecm_SOURCE_DIR}/find-modules"
-		"${ecm_BINARY_DIR}/find-modules"
-		${CMAKE_MODULE_PATH}
+	FetchContent_GetProperties(ECM)
+	if(NOT ecm_POPULATED)
+		FetchContent_Populate(ECM)
+	endif()
+	set(ECM_MODULE_DIR      "${ecm_SOURCE_DIR}/modules")
+	set(ECM_FIND_MODULE_DIR "${ecm_SOURCE_DIR}/find-modules")
+	set(ECM_KDE_MODULE_DIR  "${ecm_SOURCE_DIR}/kde-modules")
+	set(ECM_MODULE_PATH
+		"${ECM_MODULE_DIR}"
+		"${ECM_FIND_MODULE_DIR}"
+		"${ECM_KDE_MODULE_DIR}"
 	)
+	set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH} ${CMAKE_MODULE_PATH})
 else()
 	set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
 endif()
-
-include(KDEInstallDirs6)
-include(KDECMakeSettings)
-include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 REQUIRED COMPONENTS
 	Core
 	Qml
 )
 
-find_package(KF6 REQUIRED COMPONENTS
-	Plasma # Required for cmake plasma_install_package()
-	# I18n
-)
+# Qt6's qtpaths is in Qt's private bin dir, not in PATH.
+# Use qmake6 to locate it so ECMQueryQt (called by KDEInstallDirs6) can find it.
+unset(QUERY_EXECUTABLE CACHE)
+find_program(_qt6_qmake NAMES qmake6 qmake)
+if(_qt6_qmake)
+	execute_process(
+		COMMAND "${_qt6_qmake}" -query QT_INSTALL_BINS
+		OUTPUT_VARIABLE _qt6_install_bins
+		RESULT_VARIABLE _qt6_query_result
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		ERROR_QUIET
+	)
+	if(_qt6_query_result EQUAL 0)
+		find_program(QUERY_EXECUTABLE
+			NAMES qtpaths6 qtpaths
+			HINTS "${_qt6_install_bins}"
+			NO_DEFAULT_PATH
+		)
+	endif()
+endif()
+
+include(KDEInstallDirs6)
+include(KDECMakeSettings)
+include(KDECompilerSettings NO_POLICY_SCOPE)
+
+find_package(Plasma REQUIRED) # Required for cmake plasma_install_package()
 
 plasma_install_package(package com.github.tonymugen.plasma-show-stdout)
 
@@ -120,8 +143,6 @@ add_library(plasma_show_stdout
 target_link_libraries(plasma_show_stdout
 	Qt::Core
 	Qt::Qml
-	# KF5::Plasma
-	# KF5::I18n
 )
 
 install(
@@ -195,13 +216,13 @@ set(CMAKE_CXX_FLAGS_TEST
 if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTS)
 	add_executable(tests
 		plugin/tests/tests.cpp
+		plugin/scriptModules.cpp
 	)
 	target_link_libraries(tests
-		PRIVATE plasma_show_stdout
 		PRIVATE Catch2::Catch2WithMain
 	)
 	target_include_directories(tests
-		PRIVATE include
+		PRIVATE plugin
 	)
 	include(CTest)
 	include(Catch)

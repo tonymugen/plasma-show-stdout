@@ -29,9 +29,6 @@
 #include <cstdio>
 #include <string>
 #include <filesystem>
-#include <chrono>
-#include <thread>
-#include <mutex>
 
 #include "scriptModules.hpp"
 
@@ -61,31 +58,33 @@ std::string PSSspace::runScript(const std::filesystem::path &script) {
 }
 
 void TimedModule::operator()() const {
-	std::mutex mtx;
 	while (true) {
 		std::string rawOutput = runScript(script_);
 		if (rawOutput.size() > outputLengthLimit_) {
 			rawOutput.erase( rawOutput.begin() + outputLengthLimit_, rawOutput.end() );
 		}
-		std::unique_lock<std::mutex> lock(mtx);
+		std::unique_lock<std::mutex> lock(*mutex_);
 		*outputString_ = std::move(rawOutput);
 		signalToMain_->notify_one();
-		lock.unlock();
-		std::this_thread::sleep_for(refreshInterval_);
+		if ( stopSignal_->wait_for(lock, refreshInterval_, [this]{ return *stop_; }) ) {
+			return;
+		}
 	}
 }
 
 void SignalModule::operator()() const {
-	std::mutex mtx;
 	while (true) {
-		std::unique_lock<std::mutex> lock(mtx);
-		executionSignal_->wait(lock);
+		std::unique_lock<std::mutex> lock(*mutex_);
+		executionSignal_->wait(lock, [this]{ return *execute_ || *stop_; });
+		if (*stop_) return;
+		*execute_ = false;
+		lock.unlock();
 		std::string rawOutput = runScript(script_);
 		if (rawOutput.size() > outputLengthLimit_) {
 			rawOutput.erase( rawOutput.begin() + outputLengthLimit_, rawOutput.end() );
 		}
+		lock.lock();
 		*outputString_ = std::move(rawOutput);
 		signalToMain_->notify_one();
-		lock.unlock();
 	}
 }

@@ -32,6 +32,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <filesystem>
 
 namespace PSSspace {
@@ -54,18 +55,27 @@ namespace PSSspace {
 		/** \brief Constructor with data
 		 *
 		 * \param[in] executionInterval refresh interval
-		 * \param[in] signalOnChange condition variable to notify main thread that an execution happened
+		 * \param[in] stopSignal condition variable the spawning thread notifies to stop the loop
+		 * \param[in] mutex mutex shared with the spawning thread; guards `stop`, `outputTarget`, and the stop wait
+		 * \param[in] stop flag shared with the spawning thread; set to `true` before notifying `stopSignal` to terminate
+		 * \param[in] signalOnChange condition variable to notify the spawning thread that an execution happened
 		 * \param[in] script path to the shell script
 		 * \param[in] outputLengthLimit limit on output string length
 		 * \param[in] outputTarget pointer to the target string
 		 */
 		TimedModule(
 			const std::chrono::duration<uint32_t> &executionInterval,
+			std::shared_ptr<std::condition_variable> stopSignal,
+			std::shared_ptr<std::mutex> mutex,
+			std::shared_ptr<bool> stop,
 			std::unique_ptr<std::condition_variable> signalOnChange,
 			const std::filesystem::path &script,
 			const size_t &outputLengthLimit,
 			std::unique_ptr<std::string> outputTarget
 		) : refreshInterval_{executionInterval},
+			stopSignal_{std::move(stopSignal)},
+			mutex_{std::move(mutex)},
+			stop_{std::move(stop)},
 			signalToMain_{std::move(signalOnChange)},
 			script_{script},
 			outputLengthLimit_{outputLengthLimit},
@@ -91,7 +101,13 @@ namespace PSSspace {
 	private:
 		/** \brief Refresh interval in seconds */
 		std::chrono::duration<uint32_t> refreshInterval_;
-		/** \brief Condition variable pointer to signal state change */
+		/** \brief Condition variable to receive stop signal from spawning thread */
+		std::shared_ptr<std::condition_variable> stopSignal_;
+		/** \brief Mutex shared with spawning thread */
+		std::shared_ptr<std::mutex> mutex_;
+		/** \brief Stop flag shared with spawning thread */
+		std::shared_ptr<bool> stop_;
+		/** \brief Condition variable pointer to signal state change to spawning thread */
 		std::unique_ptr<std::condition_variable> signalToMain_;
 		/** \brief Path to the script */
 		std::filesystem::path script_;
@@ -110,19 +126,28 @@ namespace PSSspace {
 		SignalModule() = default;
 		/** \brief Constructor with data
 		 *
-		 * \param[in] signalToExecute condition variable to wait on
-		 * \param[in] signalOnChange condition variable to notify main thread that an execution happened
+		 * \param[in] signalToExecute condition variable the spawning thread notifies to trigger execution or stop
+		 * \param[in] mutex mutex shared with the spawning thread; guards `execute`, `stop`, and `outputTarget`
+		 * \param[in] execute flag shared with the spawning thread; set to `true` before notifying `signalToExecute` to trigger a run
+		 * \param[in] stop flag shared with the spawning thread; set to `true` before notifying `signalToExecute` to terminate
+		 * \param[in] signalOnChange condition variable to notify the spawning thread that an execution happened
 		 * \param[in] script path to the shell script
 		 * \param[in] outputLengthLimit limit on output string length
 		 * \param[in] outputTarget pointer to the target string
 		 */
 		SignalModule(
 			std::unique_ptr<std::condition_variable> signalToExecute,
+			std::shared_ptr<std::mutex> mutex,
+			std::shared_ptr<bool> execute,
+			std::shared_ptr<bool> stop,
 			std::unique_ptr<std::condition_variable> signalOnChange,
 			const std::filesystem::path &script,
 			const size_t &outputLengthLimit,
 			std::unique_ptr<std::string> &outputTarget
 		) : executionSignal_{std::move(signalToExecute)},
+			mutex_{std::move(mutex)},
+			execute_{std::move(execute)},
+			stop_{std::move(stop)},
 			signalToMain_{std::move(signalOnChange)},
 			script_{script},
 			outputLengthLimit_{outputLengthLimit},
@@ -146,9 +171,15 @@ namespace PSSspace {
 		 */
 		void operator()() const;
 	private:
-		/** \brief Condition variable pointer that triggers execution */
+		/** \brief Condition variable pointer that triggers execution or stop */
 		std::unique_ptr<std::condition_variable> executionSignal_;
-		/** \brief Condition variable pointer to signal state change */
+		/** \brief Mutex shared with spawning thread */
+		std::shared_ptr<std::mutex> mutex_;
+		/** \brief Execution flag shared with spawning thread */
+		std::shared_ptr<bool> execute_;
+		/** \brief Stop flag shared with spawning thread */
+		std::shared_ptr<bool> stop_;
+		/** \brief Condition variable pointer to signal state change to spawning thread */
 		std::unique_ptr<std::condition_variable> signalToMain_;
 		/** \brief Path to the script */
 		std::filesystem::path script_;
