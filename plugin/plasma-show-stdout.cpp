@@ -17,5 +17,105 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/// Plasma interface to display script output
+/** \file
+ * \author Anthony J. Greenberg
+ * \copyright Copyright (c) 2026 Anthony J. Greenberg
+ * \version 0.1.0
+ *
+ * Implementation of display script output in PLasma.
+ */
+
+
+#include <QtQml>
+#include <QDir>
+
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <utility>
+
 #include "plasma-show-stdout.hpp"
 #include "scriptModules.hpp"
+
+namespace {
+	constexpr std::chrono::duration<uint32_t> kRefreshInterval{60};
+	constexpr size_t                          kOutputLimit{300};
+}
+
+PSSspace::ScriptOutput::ScriptOutput(QObject *parent)
+	: QObject(parent),
+	  mutex_( std::make_shared<std::mutex>() ),
+	  stopSignal_( std::make_shared<std::condition_variable>() ),
+	  stop_( std::make_shared<bool>(false) ) {
+	auto signalToMain = std::make_unique<std::condition_variable>();
+	signalToMainRaw_  = signalToMain.get();
+
+	auto outputString = std::make_unique<std::string>();
+	outputRaw_        = outputString.get();
+
+	const std::filesystem::path scriptPath {
+		(QDir::homePath() + "/.scripts/disk").toStdString()
+	};
+
+	PSSspace::TimedModule mod(
+		kRefreshInterval,
+		stopSignal_, mutex_, stop_,
+		std::move(signalToMain),
+		scriptPath,
+		kOutputLimit,
+		std::move(outputString)
+	);
+
+	workerThread_ = std::thread( std::move(mod) );
+	bridgeThread_ = std::thread(&ScriptOutput::bridgeLoop_, this);
+}
+
+PSSspace::ScriptOutput::~ScriptOutput() {
+	{
+		std::lock_guard<std::mutex> lock(*mutex_);
+		*stop_ = true;
+	}
+	if (signalToMainRaw_ != nullptr) {
+		signalToMainRaw_->notify_all();
+	}
+	stopSignal_->notify_all();
+
+	// bridge must exit before the worker tears down the
+	// condition variable / output string it references
+	if ( bridgeThread_.joinable() ) {
+		bridgeThread_.join();
+	}
+	if ( workerThread_.joinable() ) {
+		workerThread_.join();
+	}
+}
+
+void PSSspace::ScriptOutput::bridgeLoop_() {
+	while (true) {
+		std::string snapshot;
+		{
+			std::unique_lock<std::mutex> lock(*mutex_);
+			signalToMainRaw_->wait(lock, [this]{
+				return *stop_ || !outputRaw_->empty();
+			});
+			if (*stop_) {
+				return;
+			}
+			snapshot = *outputRaw_;
+			outputRaw_->clear();
+		}
+		QString newText = QString::fromStdString(snapshot);
+		QMetaObject::invokeMethod(this, [this, newText] {
+			if (text_ == newText) {
+				return;
+			}
+			text_ = newText;
+			emit textChanged();
+		}, Qt::QueuedConnection);
+	}
+}
+
+void ShowStdoutPlugin::registerTypes(const char *uri) {
+	qmlRegisterType<PSSspace::ScriptOutput>(uri, 1, 0, "ScriptOutput");
+}

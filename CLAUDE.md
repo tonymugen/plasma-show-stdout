@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A KDE Plasma plasmoid that displays stdout from shell scripts. Scripts are configured via a config panel and run either on a timer or triggered via `RTMIN` signal. Each script runs on its own thread in a C++17 backend exposed to QML as a plugin.
+A KDE Plasma plasmoid that displays stdout from shell scripts. Each script runs on its own thread in a C++17 backend (`TimedModule` for interval polling, `SignalModule` for `RTMIN`-triggered runs) exposed to QML as a plugin.
+
+Current scope: the QML frontend hardwires a single `TimedModule` running `~/.scripts/disk` every 60 seconds (constants `kRefreshInterval` and `kOutputLimit` in `plugin/plasma-show-stdout.cpp`). A config panel for user-defined scripts is the long-term goal but is not yet implemented.
 
 ## Build
 
@@ -32,6 +34,11 @@ When ECM is not installed system-wide, `CMakeLists.txt` fetches it with `FetchCo
 
 In KDE 6, the Plasma framework is a standalone cmake package (`find_package(Plasma REQUIRED)`), not a component of KF6. Its config file is at `/usr/lib/cmake/Plasma/PlasmaConfig.cmake`.
 
+`package/metadata.json` must use the Plasma 6 format:
+- `X-Plasma-API`: `"plasmoid"` — **not** `"declarativeappletscript"`, which is the Plasma 5 form and causes plasmashell to report `"This Widget was written for an unknown older version of Plasma"` (a misleading error: the metadata is being rejected, not the QML).
+- `X-Plasma-API-Version`: `"2"`
+- `KPackageStructure`: `"Plasma/Applet"` — top-level, not nested inside `KPlugin`.
+
 ### Tests
 
 Tests use Catch2 (fetched automatically via FetchContent):
@@ -52,6 +59,19 @@ Tests are in `plugin/tests/tests.cpp` and cover three areas:
 
 The thread tests use the shared `mutex_` for all synchronisation: the test waits on the `signalToMain` raw pointer with a 5-second `wait_for` timeout (so a broken stop mechanism fails fast rather than hanging). Output is read and cleared under the lock to avoid races between test reads and module writes.
 
+### Running locally
+
+After `cmake --install build --component plasmoid` (with `-DCMAKE_INSTALL_PREFIX=~/.local` for a user install), the Plasma package side typically also needs `kpackagetool6` because `plasma_install_package()` under a user prefix does not always land the package where `plasmashell`/`plasmawindowed` searches:
+
+```bash
+kpackagetool6 --upgrade package/ --type Plasma/Applet  # use --install on first run
+QML_IMPORT_PATH=~/.local/lib/qml plasmawindowed com.github.tonymugen.plasma-show-stdout
+```
+
+`QML_IMPORT_PATH` is required so the C++ plugin (installed under the user QML dir) is discoverable. To avoid setting it per-invocation — and to make the widget loadable from `plasmashell`'s "add widgets" panel — persist it via `~/.config/plasma-workspace/env/qml-import-path.sh` and restart `plasmashell`.
+
+Note that the argument to `plasmawindowed` is the **KPackage applet ID** (with hyphens), not the QML module URI.
+
 ## Architecture
 
 Two distinct layers communicate via condition variables:
@@ -62,11 +82,18 @@ Two distinct layers communicate via condition variables:
 - `SignalModule`: waits on `executionSignal_` with predicate `*execute_ || *stop_`; if stop, exits; otherwise resets `*execute_`, releases lock, runs script, reacquires lock, writes output, notifies `signalToMain_`; to trigger a run the spawning thread sets `*execute_ = true` and notifies `executionSignal_`; to stop it sets `*stop_ = true` and notifies the same CV
 - Both classes are move-only; `mutex_`, `stop_`, and (for `SignalModule`) `execute_` are `shared_ptr` so the spawning thread retains access after constructing the module; `signalToMain_` and `executionSignal_` are `unique_ptr` — the spawning thread keeps a raw pointer before moving them in
 
-**QML frontend** (`package/contents/ui/main.qml`) imports the plugin as `com.github.tonymugen.plasma-show-stdout 1.0`. The QML plugin registration lives in `plasma-show-stdout.hpp`/`.cpp` (currently skeletal — `QQmlExtensionPlugin` subclass not yet fleshed out).
+**QML plugin** (`plugin/plasma-show-stdout.hpp`/`.cpp`):
+- `ShowStdoutPlugin` (a `QQmlExtensionPlugin`) registers `PSSspace::ScriptOutput` as the QML type `ScriptOutput` at URI `com.github.tonymugen.plasmashowstdout` version 1.0.
+- `ScriptOutput` (`QObject`) exposes a `text` `Q_PROPERTY` (`QString`, `NOTIFY textChanged`) to QML. Its constructor spawns a `TimedModule` worker thread plus a bridge thread (`bridgeLoop_`) that waits on the worker's `signalToMain_` CV, snapshots+clears the shared `outputRaw_` buffer under `mutex_`, then posts a lambda to the GUI thread via `QMetaObject::invokeMethod(Qt::QueuedConnection)` to update `text_` and `emit textChanged()`. The destructor sets `*stop_ = true`, notifies both CVs, then **joins the bridge before the worker** — the worker owns the `condition_variable` and `std::string` that the bridge accesses via raw pointers, so the bridge must exit first.
+- The bridge also short-circuits redundant updates (`if (text_ == newText) return;` before emitting), so unchanged script output does not trigger QML re-binds.
 
-**QML plugin module** (`plugin/qmldir`) maps the module name to the `plasma_show_stdout` shared library. Both the library and `qmldir` install to `${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasma-show-stdout`.
+**QML module URI vs KPackage applet ID** — these are deliberately distinct because QML import URIs must be dot-separated identifiers and may not contain hyphens (a hyphen in the URI triggers a QML parse error at the `import` line, which plasmashell reports as the same misleading "unknown older version of Plasma" error described above):
+- QML module URI: `com.github.tonymugen.plasmashowstdout` — used in `qmldir`, in the QML `import` statement, and as the install subpath under `${KDE_INSTALL_QMLDIR}/`.
+- KPackage applet ID: `com.github.tonymugen.plasma-show-stdout` — used by `plasma_install_package()`, in `metadata.json`'s `KPlugin.Id`, and as the argument to `plasmawindowed`/`plasmoidviewer`.
 
-**Plasma package** (`package/`) installs under the applet ID `com.github.tonymugen.plasma-show-stdout` via `plasma_install_package()`.
+**QML plugin module** (`plugin/qmldir`) maps the URI to the `plasma_show_stdout` shared library and declares `classname ShowStdoutPlugin`. Both the library and `qmldir` install to `${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasmashowstdout`.
+
+**Plasma package** (`package/`) installs under the applet ID `com.github.tonymugen.plasma-show-stdout` via `plasma_install_package()`. `package/contents/ui/main.qml` is a `PlasmoidItem` with a `compactRepresentation` (terminal icon, click-to-expand) and a `fullRepresentation` (scrollable monospace `Label` bound to `scriptOutput.text`); colors track the active scheme via `Kirigami.Theme.View` (with `inherit: false`). `Plasmoid.status` is currently pinned to `ActiveStatus` and `X-Plasma-NotificationAreaCategory` is set to `SystemServices` so the widget can live in the system tray.
 
 ## Conventions
 

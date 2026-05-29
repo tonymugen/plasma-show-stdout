@@ -147,12 +147,12 @@ target_link_libraries(plasma_show_stdout
 
 install(
 	TARGETS plasma_show_stdout
-	DESTINATION ${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasma-show-stdout
+	DESTINATION ${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasmashowstdout
 	COMPONENT plasmoid
 )
 install(
 	FILES plugin/qmldir
-	DESTINATION ${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasma-show-stdout
+	DESTINATION ${KDE_INSTALL_QMLDIR}/com/github/tonymugen/plasmashowstdout
 	COMPONENT plasmoid
 )
 #

@@ -13,11 +13,10 @@
 			}
 		],
 		"License": "BSD-3-Clause",
-		"Website": "https://github.com/tonymugen/plasma-show-stdout",
-		"ServiceTypes": [
-			"Plasma/Applet"
-		]
+		"Website": "https://github.com/tonymugen/plasma-show-stdout"
 	},
-	"X-Plasma-API": "declarativeappletscript",
-	"X-Plasma-MainScript": "ui/main.qml"
+	"X-Plasma-API": "plasmoid",
+	"X-Plasma-API-Version": "2",
+	"X-Plasma-NotificationAreaCategory": "SystemServices",
+	"KPackageStructure": "Plasma/Applet"
 }
