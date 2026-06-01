@@ -33,6 +33,7 @@
 #include <QQmlExtensionPlugin>
 
 #include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -60,30 +61,74 @@ namespace PSSspace {
 		/** \brief Change-notification signal for the text property */
 		void textChanged();
 	private:
-		/** \brief Script runner/Qt object thread interface
-		 * 
-		 * Translates availability of output data to a Qt signal.
+		/** \brief Per-module worker/bridge state and output bookkeeping
+		 *
+		 * One slot per configured module, held in `slots_` in display order.
+		 * The observer pointers reference objects owned by the worker thread
+		 * (or, for `executionSignal`, by the `SignalModule`), which outlive the
+		 * slot's observers because the destructor joins observers first.
 		 */
-		void bridgeLoop_();
+		struct ModuleSlot {
+			/** \brief CV the worker notifies when new output is ready (observer) */
+			std::condition_variable *changeSignal{nullptr};
+			/** \brief Worker-owned output buffer (observer) */
+			std::string *outputBuffer{nullptr};
+			/** \brief Latest output produced by this module */
+			QString fragment;
+			/** \brief Script execution thread */
+			std::thread worker;
+			/** \brief Qt bridge thread */
+			std::thread bridge;
+			/** \brief Per-module execution-trigger flag (signal modules only) */
+			std::shared_ptr<bool> execute;
+			/** \brief CV used to trigger a run (signal modules only, observer) */
+			std::condition_variable *executionSignal{nullptr};
+			/** \brief Realtime signal this module listens on (0 for timed modules) */
+			int signalNumber{0};
+		};
 
-		/** \brief Text to be displayed */
+		/** \brief Script output to Qt bridge
+		 *
+		 * Waits on the slot's change CV, snapshots and clears its output buffer,
+		 * then posts an update to the GUI thread that refreshes the slot's
+		 * fragment and rebuilds the combined `text_`. One instance runs per slot.
+		 *
+		 * \param[in] slot the module slot this bridge serves
+		 */
+		void bridgeLoop_(ModuleSlot *slot);
+		/** \brief Realtime-signal wait loop
+		 *
+		 * Drains the trigger semaphore (posted by the async-signal-safe handler),
+		 * then triggers each signal module whose flag fired. Exits when `stop_`
+		 * is set. A single instance serves all signal modules.
+		 */
+		void signalWaitLoop_();
+		/** \brief Rebuild the combined display text
+		 *
+		 * Joins every slot's fragment in order with `" | "`. Runs on the GUI
+		 * thread (from the bridge's queued update).
+		 */
+		void rebuildCombinedText_();
+
+		/** \brief Combined text to be displayed (all module fragments joined) */
 		QString text_;
 
 		/** \brief Shared `mutex` */
 		std::shared_ptr<std::mutex> mutex_;
-		/** \brief Script thread termination signal */
+		/** \brief Timed-module termination signal */
 		std::shared_ptr<std::condition_variable> stopSignal_;
-		/** \brief Termination flag */
+		/** \brief Termination flag shared by all modules */
 		std::shared_ptr<bool> stop_;
-		/** \brief CV the worker thread notifies when new output is ready */
-		std::condition_variable *signalToMainRaw_{nullptr};
-		/** \brief Raw string output from the script */
-		std::string *outputRaw_{nullptr};
 
-		/** \brief The script execution thread */
-		std::thread workerThread_;
-		/** \brief Qt bridge thread */
-		std::thread bridgeThread_;
+		/** \brief Per-module state, in display order
+		 *
+		 * A `deque` (not `vector`) so that pointers into a slot stay valid across
+		 * `push_back`: the bridges capture `&slot` fields, and `deque` keeps
+		 * references to existing elements valid when new ones are appended.
+		 */
+		std::deque<ModuleSlot> slots_;
+		/** \brief Realtime-signal wait thread (serves all signal modules) */
+		std::thread signalWaitThread_;
 	};
 
 } // namespace PSSspace
