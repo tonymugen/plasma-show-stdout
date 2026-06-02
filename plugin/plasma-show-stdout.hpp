@@ -30,6 +30,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QVariantList>
 #include <QQmlExtensionPlugin>
 
 #include <chrono>
@@ -72,13 +73,14 @@ namespace PSSspace {
 		// macros that define private declarations
 		Q_OBJECT
 		Q_PROPERTY(QString text READ text NOTIFY textChanged)
+		Q_PROPERTY(int maxSignalOffset READ maxSignalOffset CONSTANT)
 	public:
 		/** \brief QML constructor
 		 *
 		 * The entry point used by QML, which can only invoke a
-		 * `(QObject *parent)` constructor. Builds a hardwired placeholder list
-		 * of modules (until a config panel supplies them) and delegates to the
-		 * spec-taking constructor.
+		 * `(QObject *parent)` constructor. Starts with an empty module list
+		 * (`defaultSpecs()`); the QML config wiring then populates it at runtime
+		 * via `setModules`. Delegates to the spec-taking constructor.
 		 *
 		 * \param[in] parent Pointer to the parent object
 		 */
@@ -95,11 +97,34 @@ namespace PSSspace {
 		explicit ScriptOutput(std::vector<ModuleSpec> specs, QObject *parent = nullptr);
 		/** \brief Destructor */
 		~ScriptOutput() override;
-		/** \brief Text output 
+		/** \brief Text output
 		 *
 		 * \return A `QString` object for display
 		 */
 		QString text() const { return text_; }
+		/** \brief Largest valid realtime-signal offset
+		 *
+		 * The inclusive upper bound for a signal module's RTMIN offset, i.e.
+		 * `SIGRTMAX - SIGRTMIN`. Exposed so the config UI can size its spinbox
+		 * without hard-coding glibc-specific signal numbers (`SIGRTMIN`/
+		 * `SIGRTMAX` are runtime calls, not constants).
+		 *
+		 * \return the maximum offset N usable as `SIGRTMIN + N`
+		 */
+		int maxSignalOffset() const;
+		/** \brief (Re)configure the running modules from QML
+		 *
+		 * Tears down any currently running modules and starts the ones described
+		 * by `specs`. Each entry is a map with keys `kind` (0 = Timed,
+		 * 1 = Signal), `script` (path string), `interval` (seconds, Timed only),
+		 * `signalOffset` (RTMIN offset, Signal only) and optional `outputLimit`.
+		 * Entries with an empty `script` are skipped. This is the runtime entry
+		 * point the QML config wiring calls; the signal number passed to a
+		 * `SignalModule` is computed here as `SIGRTMIN + signalOffset`.
+		 *
+		 * \param[in] specs module descriptions, in display order
+		 */
+		Q_INVOKABLE void setModules(const QVariantList &specs);
 	signals:
 		/** \brief Change-notification signal for the text property */
 		void textChanged();
@@ -130,6 +155,28 @@ namespace PSSspace {
 			int signalNumber{0};
 		};
 
+		/** \brief Build and spawn the modules described by `specs`
+		 *
+		 * The two-pass spawn path shared by the spec-taking constructor and
+		 * `setModules`: pass 1 builds every `ModuleSlot` (so the bridges can
+		 * capture stable `&slot` pointers), then signal handlers are installed
+		 * for the distinct signal numbers in use, then pass 2 spawns the worker
+		 * and bridge threads (and the signal-wait thread if any signal module is
+		 * present). Global signal state (`sem_init`, handler install, the
+		 * wait thread) is touched only when at least one signal module exists.
+		 *
+		 * \param[in] specs modules to run, in display order
+		 */
+		void startModules_(std::vector<ModuleSpec> specs);
+		/** \brief Stop and join all running modules, resetting for reuse
+		 *
+		 * Sets the stop flag, wakes every waiter, joins the bridges and the
+		 * signal-wait loop before the workers they observe, then (only if this
+		 * instance installed them) restores `SIG_IGN` and destroys the trigger
+		 * semaphore. Finally clears `slots_` so the instance can be restarted by
+		 * a subsequent `startModules_`. Safe to call when nothing is running.
+		 */
+		void stopModules_();
 		/** \brief Script output to Qt bridge
 		 *
 		 * Waits on the slot's change CV, snapshots and clears its output buffer,
@@ -172,6 +219,15 @@ namespace PSSspace {
 		std::deque<ModuleSlot> slots_;
 		/** \brief Realtime-signal wait thread (serves all signal modules) */
 		std::thread signalWaitThread_;
+		/** \brief Whether this instance installed signal handlers / `sem_init`
+		 *
+		 * Set by `startModules_` when at least one signal module is present, so
+		 * `stopModules_` only undoes the global signal state this instance set
+		 * up. Lets a module-less instance (e.g. the config UI's probe used to
+		 * read `maxSignalOffset`) coexist with the running widget without
+		 * touching the shared trigger semaphore.
+		 */
+		bool signalsActive_{false};
 	};
 
 } // namespace PSSspace

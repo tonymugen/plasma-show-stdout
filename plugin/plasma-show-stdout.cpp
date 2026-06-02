@@ -28,6 +28,8 @@
 
 
 #include <QtQml>
+#include <QVariantList>
+#include <QVariantMap>
 
 // C headers for RTMIN signaling
 #include <csignal>
@@ -36,6 +38,9 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <variant>
@@ -87,6 +92,20 @@ PSSspace::ScriptOutput::ScriptOutput(std::vector<ModuleSpec> specs, QObject *par
 	  mutex_( std::make_shared<std::mutex>() ),
 	  stopSignal_( std::make_shared<std::condition_variable>() ),
 	  stop_( std::make_shared<bool>(false) ) {
+	startModules_( std::move(specs) );
+}
+
+PSSspace::ScriptOutput::~ScriptOutput() {
+	stopModules_();
+}
+
+void PSSspace::ScriptOutput::startModules_(std::vector<ModuleSpec> specs) {
+	// The instance may be restarting (setModules), so clear the stop flag that a
+	// previous stopModules_ set before the new workers consult it.
+	{
+		std::lock_guard<std::mutex> lock(*mutex_);
+		*stop_ = false;
+	}
 	// Transient holder for the built modules; moved into the workers in pass 2.
 	std::vector<ModuleVariant> modules;
 	modules.reserve( specs.size() );
@@ -130,19 +149,32 @@ PSSspace::ScriptOutput::ScriptOutput(std::vector<ModuleSpec> specs, QObject *par
 		slots_.push_back( std::move(slot) );
 	}
 
-	// Install one handler per distinct signal number before any run is triggered.
-	sem_init(&gTriggerSemaphore, 0, 0);
+	// Global signal state (the trigger semaphore, the process-wide handlers and
+	// the wait thread) is touched only when a signal module is actually present,
+	// so a module-less instance leaves the shared globals untouched.
 	bool anySignal = false;
 	for (const ModuleSlot &slot : slots_) {
 		if (slot.signalNumber != 0) {
 			anySignal = true;
-			struct sigaction triggerSpec{};
-			triggerSpec.sa_handler = handleTriggerSignal;
-			sigemptyset(&triggerSpec.sa_mask);
-			triggerSpec.sa_flags = SA_RESTART;
-			sigaction(slot.signalNumber, &triggerSpec, nullptr);
+			break;
 		}
 	}
+	if (anySignal) {
+		sem_init(&gTriggerSemaphore, 0, 0);
+		// Install one handler per distinct signal number before any run is
+		// triggered; clear each fired flag so a stale post can't trigger a run.
+		for (const ModuleSlot &slot : slots_) {
+			if (slot.signalNumber != 0) {
+				gSignalFired[static_cast<size_t>(slot.signalNumber)].store(false, std::memory_order_relaxed);
+				struct sigaction triggerSpec{};
+				triggerSpec.sa_handler = handleTriggerSignal;
+				sigemptyset(&triggerSpec.sa_mask);
+				triggerSpec.sa_flags = SA_RESTART;
+				sigaction(slot.signalNumber, &triggerSpec, nullptr);
+			}
+		}
+	}
+	signalsActive_ = anySignal;
 
 	// Pass 2: spawn the workers (each runs its variant) and their bridges.
 	for (size_t i = 0; i < slots_.size(); ++i) {
@@ -153,12 +185,16 @@ PSSspace::ScriptOutput::ScriptOutput(std::vector<ModuleSpec> specs, QObject *par
 		slot.bridge = std::thread(&ScriptOutput::bridgeLoop_, this, &slot);
 	}
 
-	if (anySignal) {
+	if (signalsActive_) {
 		signalWaitThread_ = std::thread(&ScriptOutput::signalWaitLoop_, this);
 	}
 }
 
-PSSspace::ScriptOutput::~ScriptOutput() {
+void PSSspace::ScriptOutput::stopModules_() {
+	// Nothing running and no global signal state installed: nothing to undo.
+	if (slots_.empty() && !signalsActive_) {
+		return;
+	}
 	{
 		std::lock_guard<std::mutex> lock(*mutex_);
 		*stop_ = true;
@@ -173,7 +209,9 @@ PSSspace::ScriptOutput::~ScriptOutput() {
 		}
 	}
 	stopSignal_->notify_all();
-	sem_post(&gTriggerSemaphore); // unblock signalWaitLoop_
+	if (signalsActive_) {
+		sem_post(&gTriggerSemaphore); // unblock signalWaitLoop_
+	}
 
 	// The bridges and the signal-wait loop reference worker-owned condition
 	// variables / output strings (and the SignalModule-owned execution CV)
@@ -192,16 +230,22 @@ PSSspace::ScriptOutput::~ScriptOutput() {
 		}
 	}
 
-	// stop delivering signals to the (about-to-be-destroyed) semaphore
-	for (const ModuleSlot &slot : slots_) {
-		if (slot.signalNumber != 0) {
-			struct sigaction ignoreSpec{};
-			ignoreSpec.sa_handler = SIG_IGN;
-			sigemptyset(&ignoreSpec.sa_mask);
-			sigaction(slot.signalNumber, &ignoreSpec, nullptr);
+	if (signalsActive_) {
+		// stop delivering signals to the (about-to-be-destroyed) semaphore
+		for (const ModuleSlot &slot : slots_) {
+			if (slot.signalNumber != 0) {
+				struct sigaction ignoreSpec{};
+				ignoreSpec.sa_handler = SIG_IGN;
+				sigemptyset(&ignoreSpec.sa_mask);
+				sigaction(slot.signalNumber, &ignoreSpec, nullptr);
+			}
 		}
+		sem_destroy(&gTriggerSemaphore);
 	}
-	sem_destroy(&gTriggerSemaphore);
+
+	// Reset for reuse: a subsequent startModules_ rebuilds from scratch.
+	slots_.clear();
+	signalsActive_ = false;
 }
 
 void PSSspace::ScriptOutput::bridgeLoop_(ModuleSlot *slot) {
@@ -261,6 +305,47 @@ void PSSspace::ScriptOutput::rebuildCombinedText_() {
 		first = false;
 	}
 	text_ = combined;
+}
+
+int PSSspace::ScriptOutput::maxSignalOffset() const {
+	return SIGRTMAX - SIGRTMIN;
+}
+
+void PSSspace::ScriptOutput::setModules(const QVariantList &specs) {
+	stopModules_();
+
+	std::vector<ModuleSpec> parsed;
+	parsed.reserve( static_cast<size_t>(specs.size()) );
+	for (const QVariant &entry : specs) {
+		const QVariantMap map = entry.toMap();
+		const QString script  = map.value(QStringLiteral("script")).toString();
+		if (script.isEmpty()) {
+			continue; // an unconfigured script produces no module
+		}
+		ModuleSpec spec;
+		spec.kind = map.value(QStringLiteral("kind")).toInt() == 1
+			? ModuleSpec::Kind::Signal
+			: ModuleSpec::Kind::Timed;
+		spec.script = script.toStdString();
+		spec.outputLimit = map.contains(QStringLiteral("outputLimit"))
+			? static_cast<size_t>(map.value(QStringLiteral("outputLimit")).toInt())
+			: spec.outputLimit;
+		if (spec.kind == ModuleSpec::Kind::Timed) {
+			spec.interval = std::chrono::duration<uint32_t>{
+				static_cast<uint32_t>(map.value(QStringLiteral("interval")).toInt()) };
+		} else {
+			// the config stores an RTMIN offset; the raw signal is glibc-runtime
+			spec.signalNumber = SIGRTMIN + map.value(QStringLiteral("signalOffset")).toInt();
+		}
+		parsed.push_back( std::move(spec) );
+	}
+
+	startModules_( std::move(parsed) );
+
+	// Drop any stale fragment text so the display reflects the new module set
+	// immediately; the freshly spawned modules will publish their own output.
+	text_.clear();
+	emit textChanged();
 }
 
 void ShowStdoutPlugin::registerTypes(const char *uri) {

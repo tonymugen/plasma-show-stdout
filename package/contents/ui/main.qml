@@ -11,6 +11,38 @@ PlasmoidItem {
 
 	Plasmoid.status: PlasmaCore.Types.ActiveStatus
 
+	// Lives at the root (not inside fullRepresentation) so the configured
+	// modules run regardless of whether the widget is expanded.
+	ScriptOutput {
+		id: scriptOutput
+	}
+
+	// Push the (single, for now) configured module into the backend. The signal
+	// number is computed C++-side from the RTMIN offset, so we pass the offset.
+	// An empty path means "not configured yet" -> no modules.
+	function applyConfig() {
+		if (Plasmoid.configuration.scriptPath.length === 0) {
+			scriptOutput.setModules([]);
+			return;
+		}
+		scriptOutput.setModules([{
+			kind: Plasmoid.configuration.triggerKind,
+			script: Plasmoid.configuration.scriptPath,
+			interval: Plasmoid.configuration.interval,
+			signalOffset: Plasmoid.configuration.signalOffset
+		}]);
+	}
+
+	Component.onCompleted: applyConfig()
+
+	Connections {
+		target: Plasmoid.configuration
+		function onScriptPathChanged() { root.applyConfig() }
+		function onTriggerKindChanged() { root.applyConfig() }
+		function onIntervalChanged() { root.applyConfig() }
+		function onSignalOffsetChanged() { root.applyConfig() }
+	}
+
 	compactRepresentation: MouseArea {
 		onClicked: root.expanded = !root.expanded
 		Kirigami.Icon {
@@ -25,10 +57,6 @@ PlasmoidItem {
 
 		Kirigami.Theme.colorSet: Kirigami.Theme.View
 		Kirigami.Theme.inherit: false
-
-		ScriptOutput {
-			id: scriptOutput
-		}
 
 		Rectangle {
 			anchors.fill: parent

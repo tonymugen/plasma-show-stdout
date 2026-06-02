@@ -9,6 +9,8 @@
 
 #include <QCoreApplication>
 #include <QObject>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include "catch2/catch_session.hpp"
 #include "catch2/catch_test_macros.hpp"
@@ -66,6 +68,28 @@ namespace {
 			size_t outputLimit = 1000) {
 		return { PSSspace::ModuleSpec::Kind::Signal, script,
 			std::chrono::duration<uint32_t>{}, signalNumber, outputLimit };
+	}
+
+	// QVariantMap entries mirroring what the QML config wiring passes to
+	// setModules: kind 0/1, a script path string, and (per kind) interval
+	// seconds or an RTMIN offset. setModules computes SIGRTMIN + signalOffset.
+	QVariantMap timedEntry(const std::filesystem::path &script, int intervalSeconds = 0,
+			int outputLimit = 1000) {
+		return {
+			{ QStringLiteral("kind"),        0 },
+			{ QStringLiteral("script"),      QString::fromStdString(script.string()) },
+			{ QStringLiteral("interval"),    intervalSeconds },
+			{ QStringLiteral("outputLimit"), outputLimit }
+		};
+	}
+	QVariantMap signalEntry(const std::filesystem::path &script, int signalOffset,
+			int outputLimit = 1000) {
+		return {
+			{ QStringLiteral("kind"),         1 },
+			{ QStringLiteral("script"),       QString::fromStdString(script.string()) },
+			{ QStringLiteral("signalOffset"), signalOffset },
+			{ QStringLiteral("outputLimit"),  outputLimit }
+		};
 	}
 }
 
@@ -140,4 +164,65 @@ TEST_CASE("ScriptOutput runs a signal module only when its signal is raised", "[
 	raise(signalNumber); // delivered to this thread; the file-scope handler posts the semaphore
 	REQUIRE( pumpUntil([&]{ return !out.text().isEmpty(); }, 5s) );
 	REQUIRE_THAT( out.text().toStdString(), Catch::Matchers::ContainsSubstring("so signal") );
+}
+
+TEST_CASE("ScriptOutput.setModules starts a timed module at runtime", "[ScriptOutput]") {
+	// Construct empty (the QML path), then configure via the runtime entry point.
+	const TempScript script("pss_so_set_timed.sh", "printf 'set timed'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+	REQUIRE( out.text().isEmpty() );
+
+	out.setModules( QVariantList{ timedEntry(script.path) } );
+	REQUIRE( pumpUntil([&]{ return !out.text().isEmpty(); }, 5s) );
+	REQUIRE_THAT( out.text().toStdString(), Catch::Matchers::ContainsSubstring("set timed") );
+}
+
+TEST_CASE("ScriptOutput.setModules reconfigures from one script to another", "[ScriptOutput]") {
+	const TempScript first("pss_so_recfg_a.sh", "printf 'AAA'\n");
+	const TempScript second("pss_so_recfg_b.sh", "printf 'BBB'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ timedEntry(first.path) } );
+	REQUIRE( pumpUntil([&]{ return out.text().toStdString().find("AAA") != std::string::npos; }, 5s) );
+
+	// Reconfiguring tears down the first worker and starts the second; the
+	// display must end up showing only the new module's output.
+	out.setModules( QVariantList{ timedEntry(second.path) } );
+	REQUIRE( pumpUntil([&]{
+		const std::string text = out.text().toStdString();
+		return text.find("BBB") != std::string::npos && text.find("AAA") == std::string::npos;
+	}, 5s) );
+}
+
+TEST_CASE("ScriptOutput.setModules with an empty list clears the text", "[ScriptOutput]") {
+	const TempScript script("pss_so_clear.sh", "printf 'transient'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ timedEntry(script.path) } );
+	REQUIRE( pumpUntil([&]{ return !out.text().isEmpty(); }, 5s) );
+
+	out.setModules( QVariantList{} );
+	REQUIRE( pumpUntil([&]{ return out.text().isEmpty(); }, 5s) );
+}
+
+TEST_CASE("ScriptOutput.setModules skips entries with an empty script path", "[ScriptOutput]") {
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+	// An unconfigured script (empty path) must not spawn a module.
+	out.setModules( QVariantList{ timedEntry(std::filesystem::path{}) } );
+	// give any erroneously spawned worker a chance to publish, then assert empty
+	REQUIRE_FALSE( pumpUntil([&]{ return !out.text().isEmpty(); }, 500ms) );
+	REQUIRE( out.text().isEmpty() );
+}
+
+TEST_CASE("ScriptOutput.setModules runs a signal module via its RTMIN offset", "[ScriptOutput]") {
+	const TempScript script("pss_so_set_signal.sh", "printf 'set signal'\n");
+	const int signalOffset = 5;
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ signalEntry(script.path, signalOffset) } );
+	REQUIRE( out.text().isEmpty() ); // idle until triggered
+
+	raise(SIGRTMIN + signalOffset); // setModules maps the offset to this raw signal
+	REQUIRE( pumpUntil([&]{ return !out.text().isEmpty(); }, 5s) );
+	REQUIRE_THAT( out.text().toStdString(), Catch::Matchers::ContainsSubstring("set signal") );
 }
