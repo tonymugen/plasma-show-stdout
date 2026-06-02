@@ -28,7 +28,6 @@
 
 
 #include <QtQml>
-#include <QDir>
 
 // C headers for RTMIN signaling
 #include <csignal>
@@ -37,9 +36,6 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
-#include <cstdint>
-#include <filesystem>
 #include <string>
 #include <utility>
 #include <variant>
@@ -49,22 +45,10 @@
 #include "scriptModules.hpp"
 
 namespace {
-	constexpr std::chrono::duration<uint32_t> refreshInterval{60};
-	constexpr size_t                          outputLimit{300};
-
 	// A module is run via std::visit on this variant inside its worker thread;
 	// both alternatives expose `void operator()() const`, so the visitor is a
 	// one-liner and scriptModules.hpp needs no base class.
 	using ModuleVariant = std::variant<PSSspace::TimedModule, PSSspace::SignalModule>;
-
-	// Inert description of one module (placeholder for future config-panel data).
-	struct ModuleSpec {
-		enum class Kind { Timed, Signal };
-		Kind                            kind;
-		std::filesystem::path           script;
-		std::chrono::duration<uint32_t> interval{};      // Timed only
-		int                             signalNumber{0}; // Signal only (e.g. SIGRTMIN+2)
-	};
 
 	// Dispatch table for realtime signals. Sized by _NSIG (a macro constant, so
 	// it can size a std::array) and indexed by the raw signal number; note that
@@ -87,24 +71,22 @@ namespace {
 		}
 		sem_post(&gTriggerSemaphore);
 	}
+
+	// Module list for the QML constructor. Empty until a config panel supplies
+	// one, so the widget ships with no system-specific scripts baked in.
+	std::vector<PSSspace::ModuleSpec> defaultSpecs() {
+		return {};
+	}
 }
 
 PSSspace::ScriptOutput::ScriptOutput(QObject *parent)
+	: ScriptOutput(defaultSpecs(), parent) {}
+
+PSSspace::ScriptOutput::ScriptOutput(std::vector<ModuleSpec> specs, QObject *parent)
 	: QObject(parent),
 	  mutex_( std::make_shared<std::mutex>() ),
 	  stopSignal_( std::make_shared<std::condition_variable>() ),
 	  stop_( std::make_shared<bool>(false) ) {
-	const std::string home = QDir::homePath().toStdString();
-
-	// Hard-coded module list (placeholder for future config-panel data). The
-	// modules display, joined by " | ", in this order.
-	const std::vector<ModuleSpec> specs {
-		{ ModuleSpec::Kind::Timed, home + "/.scripts/disk", refreshInterval, 0 },
-		{ ModuleSpec::Kind::Signal,
-		  "/home/tonyg/extra/primary/projects/plasma-show-stdout/plugin/tests/ran_test.sh",
-		  std::chrono::duration<uint32_t>{}, SIGRTMIN + 2 },
-	};
-
 	// Transient holder for the built modules; moved into the workers in pass 2.
 	std::vector<ModuleVariant> modules;
 	modules.reserve( specs.size() );
@@ -126,14 +108,14 @@ PSSspace::ScriptOutput::ScriptOutput(QObject *parent)
 				stopSignal_, mutex_, stop_,
 				std::move(changeSignal),
 				spec.script,
-				outputLimit,
+				spec.outputLimit,
 				std::move(outputBuffer)
 			);
 		} else {
-			auto execFlag       = std::make_shared<bool>(false);
-			slot.execute        = execFlag;
-			slot.signalNumber   = spec.signalNumber;
-			auto execSignal     = std::make_unique<std::condition_variable>();
+			auto execFlag        = std::make_shared<bool>(false);
+			slot.execute         = execFlag;
+			slot.signalNumber    = spec.signalNumber;
+			auto execSignal      = std::make_unique<std::condition_variable>();
 			slot.executionSignal = execSignal.get();
 			modules.emplace_back(
 				std::in_place_type<PSSspace::SignalModule>,
@@ -141,7 +123,7 @@ PSSspace::ScriptOutput::ScriptOutput(QObject *parent)
 				mutex_, execFlag, stop_,
 				std::move(changeSignal),
 				spec.script,
-				outputLimit,
+				spec.outputLimit,
 				outputBuffer // SignalModule takes unique_ptr<string>& and moves from it
 			);
 		}

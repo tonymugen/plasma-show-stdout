@@ -32,24 +32,67 @@
 #include <QString>
 #include <QQmlExtensionPlugin>
 
+#include <chrono>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace PSSspace {
+	/** \brief Inert description of one module
+	 *
+	 * Plain configuration data describing a single script module: which script
+	 * to run and how it is triggered. A `TimedModule` uses `interval`; a
+	 * `SignalModule` uses `signalNumber`. This is the unit a future config panel
+	 * will produce and serialize; `ScriptOutput` turns a list of these into live
+	 * worker threads.
+	 */
+	struct ModuleSpec {
+		/** \brief How the module is triggered */
+		enum class Kind { Timed, Signal };
+		/** \brief Trigger kind */
+		Kind                            kind;
+		/** \brief Path to the script to run */
+		std::filesystem::path           script;
+		/** \brief Polling interval (Timed modules only) */
+		std::chrono::duration<uint32_t> interval{};
+		/** \brief Realtime signal to listen on, e.g. SIGRTMIN+2 (Signal modules only) */
+		int                             signalNumber{0};
+		/** \brief Maximum number of output characters to retain */
+		size_t                          outputLimit{300};
+	};
+
 	class ScriptOutput : public QObject {
 		// macros that define private declarations
 		Q_OBJECT
 		Q_PROPERTY(QString text READ text NOTIFY textChanged)
 	public:
-		/** \brief Constructor 
+		/** \brief QML constructor
+		 *
+		 * The entry point used by QML, which can only invoke a
+		 * `(QObject *parent)` constructor. Builds a hardwired placeholder list
+		 * of modules (until a config panel supplies them) and delegates to the
+		 * spec-taking constructor.
 		 *
 		 * \param[in] parent Pointer to the parent object
 		 */
 		explicit ScriptOutput(QObject *parent = nullptr);
+		/** \brief Constructor from a list of module specifications
+		 *
+		 * Spawns one worker (and bridge) thread per spec, in the given order;
+		 * their outputs are joined into the `text` property. This is the real
+		 * constructor; the QML constructor delegates to it.
+		 *
+		 * \param[in] specs  modules to run, in display order
+		 * \param[in] parent Pointer to the parent object
+		 */
+		explicit ScriptOutput(std::vector<ModuleSpec> specs, QObject *parent = nullptr);
 		/** \brief Destructor */
 		~ScriptOutput() override;
 		/** \brief Text output 

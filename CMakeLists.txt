@@ -227,4 +227,26 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTS)
 	include(CTest)
 	include(Catch)
 	catch_discover_tests(tests)
+
+	# ScriptOutput is a QObject whose bridge posts updates via a queued
+	# QMetaObject::invokeMethod, so its tests need Qt (a QCoreApplication +
+	# event loop) and a custom main. They live in a separate executable that
+	# compiles plasma-show-stdout.cpp directly (its symbols are not exported
+	# from the shared library under -fvisibility=hidden). Catch2::Catch2 (no
+	# main) is linked instead of Catch2WithMain so the test file owns main().
+	add_executable(scriptOutputTests
+		plugin/tests/scriptOutputTests.cpp
+		plugin/plasma-show-stdout.cpp
+		plugin/scriptModules.cpp
+	)
+	target_link_libraries(scriptOutputTests
+		PRIVATE
+			Catch2::Catch2
+			Qt::Core
+			Qt::Qml
+	)
+	target_include_directories(scriptOutputTests
+		PRIVATE plugin
+	)
+	catch_discover_tests(scriptOutputTests)
 endif()
