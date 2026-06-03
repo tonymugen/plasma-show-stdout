@@ -107,6 +107,15 @@ TEST_CASE("ScriptOutput with no modules exposes empty text", "[ScriptOutput]") {
 	REQUIRE( out.text().isEmpty() );
 }
 
+TEST_CASE("ScriptOutput exposes the host PID and name for signal triggering", "[ScriptOutput]") {
+	// The config UI shows these so the user can target the right host process.
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+	REQUIRE( out.hostPid() == static_cast<qint64>(QCoreApplication::applicationPid()) );
+	REQUIRE( out.hostPid() > 0 );
+	// hostName is /proc/self/comm — what `pkill <name>` matches against
+	REQUIRE_FALSE( out.hostName().isEmpty() );
+}
+
 TEST_CASE("ScriptOutput runs a timed module and publishes its output", "[ScriptOutput]") {
 	const TempScript script("pss_so_timed.sh", "printf 'so timed'\n");
 	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{ timedSpec(script.path) } };
@@ -177,6 +186,77 @@ TEST_CASE("ScriptOutput.setModules starts a timed module at runtime", "[ScriptOu
 	REQUIRE_THAT( out.text().toStdString(), Catch::Matchers::ContainsSubstring("set timed") );
 }
 
+TEST_CASE("ScriptOutput.setDelimiter re-joins fragments without restarting workers", "[ScriptOutput]") {
+	const TempScript first("pss_so_delim_a.sh", "printf 'AAA'\n");
+	const TempScript second("pss_so_delim_b.sh", "printf 'BBB'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+	REQUIRE( out.delimiter() == QStringLiteral(" | ") ); // historical default
+
+	out.setModules( QVariantList{ timedEntry(first.path, 60), timedEntry(second.path, 60) } );
+	REQUIRE( pumpUntil([&]{ return out.text().toStdString() == "AAA | BBB"; }, 5s) );
+
+	// Changing the delimiter rebuilds text_ synchronously from the existing
+	// fragments — no new output need arrive, so no pump is required.
+	out.setDelimiter( QStringLiteral(" :: ") );
+	REQUIRE( out.text().toStdString() == "AAA :: BBB" );
+
+	// An empty delimiter joins with nothing.
+	out.setDelimiter( QString{} );
+	REQUIRE( out.text().toStdString() == "AAABBB" );
+}
+
+TEST_CASE("ScriptOutput.setModules honors a per-entry output limit", "[ScriptOutput]") {
+	// The QVariant path carries outputLimit straight from the config; truncation
+	// is per module, so a short-limited entry is clipped while a roomier one is not.
+	const std::string longLine(200, 'Z');
+	const TempScript clipped("pss_so_lim_a.sh", "printf '" + longLine + "'\n");
+	const TempScript full("pss_so_lim_b.sh", "printf 'BBB'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{
+		timedEntry(clipped.path, 0, /*outputLimit=*/10),
+		timedEntry(full.path,    0, /*outputLimit=*/1000) } );
+	REQUIRE( pumpUntil([&]{
+		const std::string text = out.text().toStdString();
+		return text.find('Z') != std::string::npos && text.find("BBB") != std::string::npos;
+	}, 5s) );
+	// first fragment clipped to 10 'Z's, joined with the un-clipped second
+	REQUIRE( out.text().toStdString() == std::string(10, 'Z') + " | BBB" );
+}
+
+TEST_CASE("ScriptOutput.setModules runs two timed modules with a real interval", "[ScriptOutput]") {
+	// Mirrors the GUI: each timed worker runs once then sleeps for the interval,
+	// so a lost first-update race would leave the second fragment empty (the
+	// interval-0 cases mask such a race by re-running immediately).
+	const TempScript first("pss_so_two_a.sh", "printf 'AAA'\n");
+	const TempScript second("pss_so_two_b.sh", "printf 'BBB'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ timedEntry(first.path, 60), timedEntry(second.path, 60) } );
+	REQUIRE( pumpUntil([&]{
+		const std::string text = out.text().toStdString();
+		return text.find("AAA") != std::string::npos && text.find("BBB") != std::string::npos;
+	}, 5s) );
+	REQUIRE( out.text().toStdString() == "AAA | BBB" );
+}
+
+TEST_CASE("ScriptOutput.setModules runs a timed module alongside a signal module", "[ScriptOutput]") {
+	// The likely failing GUI config: a timed first module and a signal second one.
+	const TempScript timed("pss_so_mix_t.sh", "printf 'TMD'\n");
+	const TempScript signaled("pss_so_mix_s.sh", "printf 'SIG'\n");
+	const int signalOffset = 6;
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ timedEntry(timed.path, 60), signalEntry(signaled.path, signalOffset) } );
+	// the timed fragment appears immediately; the signal one stays empty until raised
+	REQUIRE( pumpUntil([&]{ return out.text().toStdString().find("TMD") != std::string::npos; }, 5s) );
+	REQUIRE( out.text().toStdString() == "TMD | " );
+
+	raise(SIGRTMIN + signalOffset);
+	REQUIRE( pumpUntil([&]{ return out.text().toStdString().find("SIG") != std::string::npos; }, 5s) );
+	REQUIRE( out.text().toStdString() == "TMD | SIG" );
+}
+
 TEST_CASE("ScriptOutput.setModules reconfigures from one script to another", "[ScriptOutput]") {
 	const TempScript first("pss_so_recfg_a.sh", "printf 'AAA'\n");
 	const TempScript second("pss_so_recfg_b.sh", "printf 'BBB'\n");
@@ -212,6 +292,23 @@ TEST_CASE("ScriptOutput.setModules skips entries with an empty script path", "[S
 	// give any erroneously spawned worker a chance to publish, then assert empty
 	REQUIRE_FALSE( pumpUntil([&]{ return !out.text().isEmpty(); }, 500ms) );
 	REQUIRE( out.text().isEmpty() );
+}
+
+TEST_CASE("ScriptOutput surfaces runScript's error when the script is missing", "[ScriptOutput]") {
+	// A configured-but-absent script (e.g. deleted while the widget runs) must not
+	// be silently dropped: runScript returns "<path> does not exist" and that text
+	// has to reach the text property so the user sees something is wrong. The path
+	// must be non-empty (an empty script is filtered out by setModules), so use a
+	// temp path that is explicitly removed first.
+	const std::filesystem::path missing =
+		std::filesystem::temp_directory_path() / "pss_so_absent.sh";
+	std::filesystem::remove(missing); // ensure it really isn't there
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ timedEntry(missing) } );
+	REQUIRE( pumpUntil([&]{ return !out.text().isEmpty(); }, 5s) );
+	REQUIRE_THAT( out.text().toStdString(),
+		Catch::Matchers::ContainsSubstring("does not exist") );
 }
 
 TEST_CASE("ScriptOutput.setModules runs a signal module via its RTMIN offset", "[ScriptOutput]") {

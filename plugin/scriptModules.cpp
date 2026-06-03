@@ -57,12 +57,43 @@ std::string PSSspace::runScript(const std::filesystem::path &script) {
 	return output;
 }
 
+void PSSspace::truncateUtf8(std::string &text, size_t maxCodepoints) {
+	// Fast path: a codepoint is at least one byte, so byte count <= limit implies
+	// codepoint count <= limit and no truncation is needed.
+	if (text.size() <= maxCodepoints) {
+		return;
+	}
+	size_t byteIndex = 0;
+	size_t codepoints = 0;
+	const size_t size = text.size();
+	while (byteIndex < size && codepoints < maxCodepoints) {
+		const auto lead = static_cast<unsigned char>(text[byteIndex]);
+		size_t sequenceLength = 1;
+		if ((lead & 0x80U) == 0x00U) {        // 0xxxxxxx: ASCII
+			sequenceLength = 1;
+		} else if ((lead & 0xE0U) == 0xC0U) { // 110xxxxx: 2-byte
+			sequenceLength = 2;
+		} else if ((lead & 0xF0U) == 0xE0U) { // 1110xxxx: 3-byte
+			sequenceLength = 3;
+		} else if ((lead & 0xF8U) == 0xF0U) { // 11110xxx: 4-byte
+			sequenceLength = 4;
+		} else {                              // stray continuation/invalid byte
+			sequenceLength = 1;
+		}
+		byteIndex += sequenceLength;
+		++codepoints;
+	}
+	// byteIndex now sits on a codepoint boundary; only erase if it lies within the
+	// string (a final sequence that overruns the end is malformed input we keep).
+	if (byteIndex < size) {
+		text.erase(text.begin() + static_cast<std::string::difference_type>(byteIndex), text.end());
+	}
+}
+
 void TimedModule::operator()() const {
 	while (true) {
 		std::string rawOutput = runScript(script_);
-		if (rawOutput.size() > outputLengthLimit_) {
-			rawOutput.erase( rawOutput.begin() + outputLengthLimit_, rawOutput.end() );
-		}
+		truncateUtf8(rawOutput, outputLengthLimit_);
 		std::unique_lock<std::mutex> lock(*mutex_);
 		*outputString_ = std::move(rawOutput);
 		signalToMain_->notify_one();
@@ -80,9 +111,7 @@ void SignalModule::operator()() const {
 		*execute_ = false;
 		lock.unlock();
 		std::string rawOutput = runScript(script_);
-		if (rawOutput.size() > outputLengthLimit_) {
-			rawOutput.erase( rawOutput.begin() + outputLengthLimit_, rawOutput.end() );
-		}
+		truncateUtf8(rawOutput, outputLengthLimit_);
 		lock.lock();
 		*outputString_ = std::move(rawOutput);
 		signalToMain_->notify_one();

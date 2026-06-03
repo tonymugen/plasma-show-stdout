@@ -3,7 +3,7 @@
 		"Id": "com.github.tonymugen.plasma-show-stdout",
 		"Name": "show-stdout",
 		"Description": "Display output from shell scripts",
-		"Version": "1.0",
+		"Version": "1.11",
 		"Category": "System Information",
 		"Icon": "applications-system",
 		"Authors": [
@@ -15,8 +15,6 @@
 		"License": "BSD-3-Clause",
 		"Website": "https://github.com/tonymugen/plasma-show-stdout"
 	},
-	"X-Plasma-API": "plasmoid",
-	"X-Plasma-API-Version": "2",
-	"X-Plasma-NotificationAreaCategory": "SystemServices",
+	"X-Plasma-API-Minimum-Version": "6.0",
 	"KPackageStructure": "Plasma/Applet"
 }

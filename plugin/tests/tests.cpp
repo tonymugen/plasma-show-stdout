@@ -80,6 +80,66 @@ TEST_CASE("runScript non-executable file", "[runScript]") {
 }
 
 /*
+ * truncateUtf8
+ */
+
+TEST_CASE("truncateUtf8 leaves a short ASCII string unchanged", "[truncateUtf8]") {
+	std::string text = "hello";
+	PSSspace::truncateUtf8(text, 10);
+	REQUIRE( text == "hello" );
+}
+
+TEST_CASE("truncateUtf8 truncates ASCII at the limit", "[truncateUtf8]") {
+	std::string text = "hello world";
+	PSSspace::truncateUtf8(text, 5);
+	REQUIRE( text == "hello" );
+}
+
+TEST_CASE("truncateUtf8 keeps a string exactly at the limit", "[truncateUtf8]") {
+	std::string text = "hello";
+	PSSspace::truncateUtf8(text, 5);
+	REQUIRE( text == "hello" );
+}
+
+TEST_CASE("truncateUtf8 to zero yields an empty string", "[truncateUtf8]") {
+	std::string text = "hello";
+	PSSspace::truncateUtf8(text, 0);
+	REQUIRE( text.empty() );
+}
+
+TEST_CASE("truncateUtf8 counts codepoints, not bytes", "[truncateUtf8]") {
+	// "é" is U+00E9 -> 0xC3 0xA9 (2 bytes); three of them is 6 bytes / 3 codepoints
+	const std::string e_acute = "\xC3\xA9";
+	const std::string text = e_acute + e_acute + e_acute;
+	std::string out = text;
+	PSSspace::truncateUtf8(out, 2);
+	REQUIRE( out == e_acute + e_acute ); // 4 bytes, 2 codepoints — not cut at 2 bytes
+}
+
+TEST_CASE("truncateUtf8 never splits a multi-byte sequence", "[truncateUtf8]") {
+	// a 3-byte char (U+2764 HEAVY BLACK HEART, 0xE2 0x9D 0xA4): truncating to 1
+	// codepoint must keep all 3 bytes, never a partial sequence
+	const std::string heart = "\xE2\x9D\xA4";
+	std::string out = heart + heart;
+	PSSspace::truncateUtf8(out, 1);
+	REQUIRE( out == heart );           // full 3-byte sequence retained
+	REQUIRE( out.size() == 3 );        // not a 1-byte cut
+
+	// mixed: ASCII then a 2-byte char; a byte-based cut at 2 would split "é"
+	std::string mixed = "a\xC3\xA9";   // 'a' + 'é' = 3 bytes, 2 codepoints
+	PSSspace::truncateUtf8(mixed, 1);
+	REQUIRE( mixed == "a" );           // stops cleanly before the multi-byte char
+}
+
+TEST_CASE("truncateUtf8 handles a 4-byte codepoint", "[truncateUtf8]") {
+	// U+1F600 GRINNING FACE: 0xF0 0x9F 0x98 0x80
+	const std::string grin = "\xF0\x9F\x98\x80";
+	std::string out = "ab" + grin + "cd";
+	PSSspace::truncateUtf8(out, 3);
+	REQUIRE( out == "ab" + grin );     // 'a','b', full emoji = 3 codepoints, 6 bytes
+}
+
+/*
  * TimedModule
  */
 

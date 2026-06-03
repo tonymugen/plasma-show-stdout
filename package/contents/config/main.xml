@@ -5,21 +5,37 @@
       http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
     <kcfgfile name=""/>
     <group name="General">
-        <entry name="scriptPath" type="String">
-            <label>Absolute path to the script whose stdout is displayed.</label>
-            <default></default>
+        <!--
+            The full, ordered module list, serialized as a JSON array of objects:
+                [{ "kind": 0|1, "script": "/path", "interval": <s>, "signalOffset": <N>, "outputLimit": <chars> }, ...]
+            kind 0 = timed polling (uses "interval" seconds), 1 = realtime signal
+            (uses "signalOffset", listened on as SIGRTMIN+N). "outputLimit" is the
+            per-script character cap on displayed output. A variable-length list
+            does not fit a fixed set of scalar cfg_<key> entries, so it lives in one
+            String key; configGeneral.qml edits an in-memory ListModel and re-encodes
+            it here, and main.qml decodes it to build the setModules() argument.
+        -->
+        <entry name="modules" type="String">
+            <label>Configured script modules, encoded as a JSON array.</label>
+            <default>[]</default>
         </entry>
-        <entry name="triggerKind" type="Int">
-            <label>How the script is triggered: 0 = timed polling, 1 = realtime signal.</label>
-            <default>0</default>
+        <!--
+            Single separator inserted between adjacent module outputs in the
+            combined display text. Surrounding spaces are significant; the default
+            " | " matches the historical hard-wired separator.
+        -->
+        <entry name="delimiter" type="String">
+            <label>Separator inserted between adjacent script outputs.</label>
+            <default> | </default>
         </entry>
-        <entry name="interval" type="Int">
-            <label>Polling interval in seconds (timed trigger only).</label>
-            <default>5</default>
-        </entry>
-        <entry name="signalOffset" type="Int">
-            <label>Realtime-signal offset N, listened on as SIGRTMIN+N (signal trigger only).</label>
-            <default>0</default>
+        <!--
+            Font family used to render the output (panel and popup). The default
+            "monospace" is the generic fixed-width alias; set a specific family
+            (e.g. a Nerd Font) so glyphs outside the default font are displayed.
+        -->
+        <entry name="fontFamily" type="String">
+            <label>Font family used to display script output.</label>
+            <default>monospace</default>
         </entry>
     </group>
 </kcfg>

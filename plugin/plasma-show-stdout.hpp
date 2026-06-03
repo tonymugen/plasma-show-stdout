@@ -73,7 +73,10 @@ namespace PSSspace {
 		// macros that define private declarations
 		Q_OBJECT
 		Q_PROPERTY(QString text READ text NOTIFY textChanged)
+		Q_PROPERTY(QString delimiter READ delimiter WRITE setDelimiter NOTIFY delimiterChanged)
 		Q_PROPERTY(int maxSignalOffset READ maxSignalOffset CONSTANT)
+		Q_PROPERTY(qint64 hostPid READ hostPid CONSTANT)
+		Q_PROPERTY(QString hostName READ hostName CONSTANT)
 	public:
 		/** \brief QML constructor
 		 *
@@ -102,6 +105,22 @@ namespace PSSspace {
 		 * \return A `QString` object for display
 		 */
 		QString text() const { return text_; }
+		/** \brief Delimiter inserted between module outputs
+		 *
+		 * \return the string joining adjacent module fragments in `text`
+		 */
+		QString delimiter() const { return delimiter_; }
+		/** \brief Set the delimiter inserted between module outputs
+		 *
+		 * A single delimiter is used between every adjacent pair of fragments (the
+		 * underlying join is one string, not per-module). Rebuilds and re-emits
+		 * `text` immediately from the existing fragments, so the display updates
+		 * without restarting any worker. Runs on the GUI thread (as does the
+		 * bridge's `text` rebuild), so no locking is needed.
+		 *
+		 * \param[in] delimiter the new separator (empty joins with nothing)
+		 */
+		void setDelimiter(const QString &delimiter);
 		/** \brief Largest valid realtime-signal offset
 		 *
 		 * The inclusive upper bound for a signal module's RTMIN offset, i.e.
@@ -112,6 +131,30 @@ namespace PSSspace {
 		 * \return the maximum offset N usable as `SIGRTMIN + N`
 		 */
 		int maxSignalOffset() const;
+		/** \brief PID of the process hosting this plugin
+		 *
+		 * The PID of the process the plugin is loaded into (`plasmashell` in
+		 * normal use, or `plasmawindowed`/`plasmoidviewer` when testing). A signal
+		 * module is triggered by sending `SIGRTMIN+N` to this process, so the
+		 * config UI shows this PID to make the trigger command unambiguous
+		 * regardless of which host is running the widget.
+		 *
+		 * \return the host process PID (`QCoreApplication::applicationPid()`)
+		 */
+		qint64 hostPid() const;
+		/** \brief Command name of the process hosting this plugin
+		 *
+		 * Read from `/proc/self/comm`, i.e. exactly what `pkill <name>` matches
+		 * against (the kernel `comm`, truncated to 15 characters). Exposed so the
+		 * config UI can show a working `pkill --signal RTMIN+N <name>` trigger
+		 * command: the `kill` shell builtin (e.g. zsh's) does not accept an
+		 * `RTMIN+N` signal spec, whereas `pkill` (a real binary) does. The name is
+		 * the actual host — `plasmashell`, `plasmoidviewer`, `plasmawindowed` — so
+		 * the command targets the right process regardless of how the widget is run.
+		 *
+		 * \return the host process command name, or an empty string if unreadable
+		 */
+		QString hostName() const;
 		/** \brief (Re)configure the running modules from QML
 		 *
 		 * Tears down any currently running modules and starts the ones described
@@ -128,6 +171,8 @@ namespace PSSspace {
 	signals:
 		/** \brief Change-notification signal for the text property */
 		void textChanged();
+		/** \brief Change-notification signal for the delimiter property */
+		void delimiterChanged();
 	private:
 		/** \brief Per-module worker/bridge state and output bookkeeping
 		 *
@@ -202,6 +247,12 @@ namespace PSSspace {
 
 		/** \brief Combined text to be displayed (all module fragments joined) */
 		QString text_;
+		/** \brief Delimiter inserted between adjacent module fragments
+		 *
+		 * Defaults to `" | "` (the historical hard-wired separator); the config UI
+		 * overrides it at runtime. Read/written only on the GUI thread.
+		 */
+		QString delimiter_{ QStringLiteral(" | ") };
 
 		/** \brief Shared `mutex` */
 		std::shared_ptr<std::mutex> mutex_;

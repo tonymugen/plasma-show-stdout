@@ -28,6 +28,7 @@
 
 
 #include <QtQml>
+#include <QCoreApplication>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -41,6 +42,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <variant>
@@ -294,12 +296,23 @@ void PSSspace::ScriptOutput::signalWaitLoop_() {
 	}
 }
 
+void PSSspace::ScriptOutput::setDelimiter(const QString &delimiter) {
+	if (delimiter_ == delimiter) {
+		return;
+	}
+	delimiter_ = delimiter;
+	emit delimiterChanged();
+	// Re-join the existing fragments with the new delimiter; no worker restart.
+	rebuildCombinedText_();
+	emit textChanged();
+}
+
 void PSSspace::ScriptOutput::rebuildCombinedText_() {
 	QString combined;
 	bool first = true;
 	for (const ModuleSlot &slot : slots_) {
 		if (!first) {
-			combined += QStringLiteral(" | ");
+			combined += delimiter_;
 		}
 		combined += slot.fragment;
 		first = false;
@@ -309,6 +322,20 @@ void PSSspace::ScriptOutput::rebuildCombinedText_() {
 
 int PSSspace::ScriptOutput::maxSignalOffset() const {
 	return SIGRTMAX - SIGRTMIN;
+}
+
+qint64 PSSspace::ScriptOutput::hostPid() const {
+	return QCoreApplication::applicationPid();
+}
+
+QString PSSspace::ScriptOutput::hostName() const {
+	// /proc/self/comm is what `pkill <name>` matches against (kernel comm,
+	// truncated to 15 chars); read it directly rather than trusting
+	// QCoreApplication::applicationName(), which may differ from comm.
+	std::ifstream comm("/proc/self/comm");
+	std::string name;
+	std::getline(comm, name); // one line, no trailing newline
+	return QString::fromStdString(name);
 }
 
 void PSSspace::ScriptOutput::setModules(const QVariantList &specs) {

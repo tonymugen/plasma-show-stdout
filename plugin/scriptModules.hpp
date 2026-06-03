@@ -44,6 +44,21 @@ namespace PSSspace {
 	 * \return string output
 	 */
 	[[nodiscard]] std::string runScript(const std::filesystem::path &script);
+	/** \brief Truncate a UTF-8 string to a codepoint limit, in place.
+	 *
+	 * Shortens `text` to at most `maxCodepoints` Unicode codepoints, cutting only
+	 * on a codepoint boundary so a multi-byte UTF-8 sequence is never split (which
+	 * would otherwise leave an invalid trailing byte that renders as the
+	 * replacement character). For ASCII this is identical to a byte truncation.
+	 * Leaves `text` unchanged if it already fits. Malformed lead/continuation bytes
+	 * are each counted as one codepoint so the function always makes progress and
+	 * degrades gracefully. The module layer's output limit is expressed in
+	 * characters (codepoints), matching the config UI.
+	 *
+	 * \param[in,out] text          UTF-8 string to truncate in place
+	 * \param[in]     maxCodepoints maximum number of codepoints to keep
+	 */
+	void truncateUtf8(std::string &text, size_t maxCodepoints);
 	/** \brief A module executed on a timer.
 	 *
 	 * Executes a shell script on a timer.
@@ -60,7 +75,7 @@ namespace PSSspace {
 		 * \param[in] stop flag shared with the spawning thread; set to `true` before notifying `stopSignal` to terminate
 		 * \param[in] signalOnChange condition variable to notify the spawning thread that an execution happened
 		 * \param[in] script path to the shell script
-		 * \param[in] outputLengthLimit limit on output string length
+		 * \param[in] outputLengthLimit limit on output length, in UTF-8 codepoints (characters)
 		 * \param[in] outputTarget pointer to the target string
 		 */
 		TimedModule(
@@ -111,7 +126,7 @@ namespace PSSspace {
 		std::unique_ptr<std::condition_variable> signalToMain_;
 		/** \brief Path to the script */
 		std::filesystem::path script_;
-		/** \brief Output length limit */
+		/** \brief Output length limit, in UTF-8 codepoints (characters) */
 		size_t outputLengthLimit_ = 0;
 		/** \brief Pointer to the output string */
 		std::unique_ptr<std::string> outputString_;
@@ -132,7 +147,7 @@ namespace PSSspace {
 		 * \param[in] stop flag shared with the spawning thread; set to `true` before notifying `signalToExecute` to terminate
 		 * \param[in] signalOnChange condition variable to notify the spawning thread that an execution happened
 		 * \param[in] script path to the shell script
-		 * \param[in] outputLengthLimit limit on output string length
+		 * \param[in] outputLengthLimit limit on output length, in UTF-8 codepoints (characters)
 		 * \param[in] outputTarget pointer to the target string
 		 */
 		SignalModule(
@@ -183,7 +198,7 @@ namespace PSSspace {
 		std::unique_ptr<std::condition_variable> signalToMain_;
 		/** \brief Path to the script */
 		std::filesystem::path script_;
-		/** \brief Output length limit */
+		/** \brief Output length limit, in UTF-8 codepoints (characters) */
 		size_t outputLengthLimit_ = 0;
 		/** \brief Pointer to the output string */
 		std::unique_ptr<std::string> outputString_;
