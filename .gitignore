@@ -2,3 +2,5 @@ build*/*
 .cache/*
 tests/*
 !tests/*.cpp
+plugin/docs/doxygen
+plugin/docs/Doxyfile

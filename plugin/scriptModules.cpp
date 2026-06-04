@@ -29,16 +29,57 @@
 #include <cstdio>
 #include <string>
 #include <filesystem>
+#include <functional>
+#include <mutex>
+#include <utility>
 
 #include "scriptModules.hpp"
 
 using namespace PSSspace;
 
+namespace {
+	// Built-in English fallback, used when no Qt/KI18n translator is installed
+	// (notably by the Qt-free unit tests). The message ids match those the bridge
+	// translator recognizes; the wording here is the msgid the bridge passes to
+	// i18n(), so the two stay in sync. An unknown id returns the bare argument.
+	std::string defaultTranslate(const std::string &messageId, const std::string &argument) {
+		if (messageId == "doesNotExist") {
+			return argument + " does not exist";
+		}
+		if (messageId == "failedToExecute") {
+			return "Failed to execute " + argument;
+		}
+		return argument;
+	}
+
+	std::mutex gTranslatorMutex;
+	PSSspace::MessageTranslator gTranslator{ defaultTranslate };
+}
+
+void PSSspace::setMessageTranslator(MessageTranslator translator) {
+	if (!translator) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(gTranslatorMutex);
+	gTranslator = std::move(translator);
+}
+
+std::string PSSspace::translateMessage(const std::string &messageId, const std::string &argument) {
+	// Copy the translator under the lock, then invoke it outside the lock so a
+	// worker thread translating cannot deadlock against the bridge installing one.
+	MessageTranslator current;
+	{
+		std::lock_guard<std::mutex> lock(gTranslatorMutex);
+		current = gTranslator;
+	}
+	return current(messageId, argument);
+}
+
 std::string PSSspace::runScript(const std::filesystem::path &script) {
 	// errors will be reported via output
 	// so the user can see if something went wrong
 	if ( !std::filesystem::exists(script) ) {
-		return script.string() + " does not exist";
+		return translateMessage("doesNotExist", script.string());
 	}
 
 	constexpr size_t bufferSize = 100;
@@ -46,7 +87,7 @@ std::string PSSspace::runScript(const std::filesystem::path &script) {
 	std::string output;
 	FILE *pipe = popen(script.c_str(), "r");
 	if (!pipe) {
-		return "Failed to execute " + script.string();
+		return translateMessage("failedToExecute", script.string());
 	}
 	while ( !feof(pipe) ) {
 		if (fgets(buffer, bufferSize, pipe) != NULL) {
@@ -63,19 +104,19 @@ void PSSspace::truncateUtf8(std::string &text, size_t maxCodepoints) {
 	if (text.size() <= maxCodepoints) {
 		return;
 	}
-	size_t byteIndex = 0;
+	size_t byteIndex  = 0;
 	size_t codepoints = 0;
 	const size_t size = text.size();
 	while (byteIndex < size && codepoints < maxCodepoints) {
 		const auto lead = static_cast<unsigned char>(text[byteIndex]);
 		size_t sequenceLength = 1;
-		if ((lead & 0x80U) == 0x00U) {        // 0xxxxxxx: ASCII
+		if ( (lead & 0x80U) == 0x00U ) {        // 0xxxxxxx: ASCII
 			sequenceLength = 1;
-		} else if ((lead & 0xE0U) == 0xC0U) { // 110xxxxx: 2-byte
+		} else if ( (lead & 0xE0U) == 0xC0U ) { // 110xxxxx: 2-byte
 			sequenceLength = 2;
-		} else if ((lead & 0xF0U) == 0xE0U) { // 1110xxxx: 3-byte
+		} else if ( (lead & 0xF0U) == 0xE0U ) { // 1110xxxx: 3-byte
 			sequenceLength = 3;
-		} else if ((lead & 0xF8U) == 0xF0U) { // 11110xxx: 4-byte
+		} else if ( (lead & 0xF8U) == 0xF0U ) { // 11110xxx: 4-byte
 			sequenceLength = 4;
 		} else {                              // stray continuation/invalid byte
 			sequenceLength = 1;
@@ -86,7 +127,7 @@ void PSSspace::truncateUtf8(std::string &text, size_t maxCodepoints) {
 	// byteIndex now sits on a codepoint boundary; only erase if it lies within the
 	// string (a final sequence that overruns the end is malformed input we keep).
 	if (byteIndex < size) {
-		text.erase(text.begin() + static_cast<std::string::difference_type>(byteIndex), text.end());
+		text.erase( text.begin() + static_cast<std::string::difference_type>(byteIndex), text.end() );
 	}
 }
 

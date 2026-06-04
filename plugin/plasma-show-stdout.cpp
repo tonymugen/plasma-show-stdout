@@ -29,8 +29,10 @@
 
 #include <QtQml>
 #include <QCoreApplication>
+#include <QString>
 #include <QVariantList>
 #include <QVariantMap>
+#include <KLocalizedString>
 
 // C headers for RTMIN signaling
 #include <csignal>
@@ -43,6 +45,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <variant>
@@ -84,6 +87,27 @@ namespace {
 	std::vector<PSSspace::ModuleSpec> defaultSpecs() {
 		return {};
 	}
+
+	// Installed once, process-wide, so the Qt-free module layer can surface
+	// localized error text without linking KI18n itself. The msgid literals here
+	// are what xgettext extracts; the module layer's English fallback mirrors them.
+	std::once_flag gTranslatorInstalled;
+	void installMessageTranslator() {
+		std::call_once(gTranslatorInstalled, [] {
+			PSSspace::setMessageTranslator(
+				[](const std::string &messageId, const std::string &argument) -> std::string {
+					const QString arg = QString::fromStdString(argument);
+					if (messageId == "doesNotExist") {
+						return i18n("%1 does not exist", arg).toStdString();
+					}
+					if (messageId == "failedToExecute") {
+						return i18n("Failed to execute %1", arg).toStdString();
+					}
+					return argument;
+				}
+			);
+		});
+	}
 }
 
 PSSspace::ScriptOutput::ScriptOutput(QObject *parent)
@@ -94,6 +118,7 @@ PSSspace::ScriptOutput::ScriptOutput(std::vector<ModuleSpec> specs, QObject *par
 	  mutex_( std::make_shared<std::mutex>() ),
 	  stopSignal_( std::make_shared<std::condition_variable>() ),
 	  stop_( std::make_shared<bool>(false) ) {
+	installMessageTranslator();
 	startModules_( std::move(specs) );
 }
 

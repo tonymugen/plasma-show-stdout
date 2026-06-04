@@ -31,11 +31,47 @@
 #include <string>
 #include <condition_variable>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <filesystem>
 
 namespace PSSspace {
+	/** \brief User-facing message translator hook.
+	 *
+	 * Maps a stable message identifier and its single argument to the localized,
+	 * user-facing string. Kept as a `std::function` so the module layer stays free
+	 * of Qt/KI18n: the Qt bridge installs a translator backed by `i18n()`, while
+	 * the default (and the pure-C++ tests) fall back to English. See
+	 * `setMessageTranslator` and `translateMessage`.
+	 *
+	 * \param[in] messageId stable identifier of the message
+	 * \param[in] argument  the message's single substituted argument
+	 * \return localized message
+	 */
+	using MessageTranslator = std::function<std::string(const std::string &messageId, const std::string &argument)>;
+	/** \brief Install the user-facing message translator.
+	 *
+	 * Replaces the process-wide translator used by `translateMessage`. The Qt
+	 * bridge calls this once at construction with a translator backed by `i18n()`;
+	 * if never called (e.g. in the Qt-free unit tests) the built-in English
+	 * default is used. A null translator is ignored. Thread-safe.
+	 *
+	 * \param[in] translator translator to install
+	 */
+	void setMessageTranslator(MessageTranslator translator);
+	/** \brief Translate a user-facing backend message.
+	 *
+	 * Looks up the currently installed translator (see `setMessageTranslator`) and
+	 * applies it to `messageId`/`argument`. Thread-safe; the translator is copied
+	 * under a lock and invoked outside it, so a worker thread can translate while
+	 * the bridge installs its translator.
+	 *
+	 * \param[in] messageId stable identifier of the message
+	 * \param[in] argument  the message's single substituted argument
+	 * \return localized message
+	 */
+	[[nodiscard]] std::string translateMessage(const std::string &messageId, const std::string &argument);
 	/** \brief Run a script once.
 	 *
 	 * Runs a shell script and return the output.
@@ -53,7 +89,7 @@ namespace PSSspace {
 	 * Leaves `text` unchanged if it already fits. Malformed lead/continuation bytes
 	 * are each counted as one codepoint so the function always makes progress and
 	 * degrades gracefully. The module layer's output limit is expressed in
-	 * characters (codepoints), matching the config UI.
+	 * characters (codepoints), matching the Plasma config UI.
 	 *
 	 * \param[in,out] text          UTF-8 string to truncate in place
 	 * \param[in]     maxCodepoints maximum number of codepoints to keep
