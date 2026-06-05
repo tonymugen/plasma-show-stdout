@@ -69,13 +69,26 @@ namespace PSSspace {
 		size_t                          outputLimit{300};
 	};
 
+	/** \brief QML bridge exposing combined script output
+	 *
+	 * `QObject` registered with QML as the `ScriptOutput` type. Owns the worker
+	 * and bridge threads for a list of `ModuleSpec`s and joins their outputs into
+	 * the `text` property for display. Constructed empty by QML, then
+	 * (re)configured at runtime via `setModules`. The exposed properties and
+	 * methods are documented individually below.
+	 */
 	class ScriptOutput : public QObject {
 		// macros that define private declarations
 		Q_OBJECT
+		/** \brief Combined, delimiter-joined output of all modules (read-only) */
 		Q_PROPERTY(QString text READ text NOTIFY textChanged)
+		/** \brief Separator inserted between adjacent module outputs */
 		Q_PROPERTY(QString delimiter READ delimiter WRITE setDelimiter NOTIFY delimiterChanged)
+		/** \brief Largest valid realtime-signal offset, `SIGRTMAX - SIGRTMIN` (constant) */
 		Q_PROPERTY(int maxSignalOffset READ maxSignalOffset CONSTANT)
+		/** \brief PID of the host process the plugin is loaded into (constant) */
 		Q_PROPERTY(qint64 hostPid READ hostPid CONSTANT)
+		/** \brief Command name of the host process, as `pkill` matches it (constant) */
 		Q_PROPERTY(QString hostName READ hostName CONSTANT)
 	public:
 		/** \brief QML constructor
@@ -283,10 +296,23 @@ namespace PSSspace {
 
 } // namespace PSSspace
 
+/** \brief QML extension plugin registering the `ScriptOutput` type
+ *
+ * `QQmlExtensionPlugin` that exposes `PSSspace::ScriptOutput` to QML as the
+ * `ScriptOutput` type under URI `com.github.tonymugen.plasmashowstdout`
+ * (version 1.0), so the Plasma package's QML can import and instantiate it.
+ */
 class ShowStdoutPlugin final : public QQmlExtensionPlugin {
 	// macros that define private declarations
 	Q_OBJECT
 	Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QQmlExtensionInterface")
 public:
+	/** \brief Register the plugin's QML types
+	 *
+	 * Invoked by the QML engine when the module is imported; registers
+	 * `ScriptOutput` under the given module URI.
+	 *
+	 * \param[in] uri the module URI being registered
+	 */
 	void registerTypes(const char *uri) override;
 };

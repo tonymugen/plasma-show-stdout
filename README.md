@@ -116,7 +116,7 @@ There are two test executables: one for the Qt-free module layer (`runScript`, `
 
 ### API documentation
 
-The C++ plugin's public headers are documented with Doxygen. Building the docs is optional (requires `doxygen`); the [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) theme is fetched automatically:
+The C++ plugin's public headers are documented with Doxygen. Building the docs is optional (requires `doxygen`); a small custom stylesheet (`plugin/docs/bayesic.css`) is applied — no external theme is fetched:
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=ON
