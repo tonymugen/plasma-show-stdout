@@ -274,6 +274,38 @@ TEST_CASE("ScriptOutput.setModules reconfigures from one script to another", "[S
 	}, 5s) );
 }
 
+TEST_CASE("ScriptOutput.setModules reconfigure drops stale queued bridge updates", "[ScriptOutput]") {
+	// Regression guard for a use-after-free / wrong-slot write: a bridge update is
+	// posted with QMetaObject::invokeMethod(Qt::QueuedConnection) capturing a raw
+	// ModuleSlot*. If such an update is still queued when a reconfigure tears that
+	// slot down, stopModules_ must flush it (removePostedEvents); otherwise the GUI
+	// loop later applies the OLD script's output to whatever now occupies that slot
+	// address. interval 0 makes the first worker flood the queue with updates.
+	const TempScript first("pss_so_stale_a.sh", "printf 'AAA'\n");
+	const TempScript second("pss_so_stale_b.sh", "printf 'BBB'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	out.setModules( QVariantList{ timedEntry(first.path) } );
+	// Let the worker/bridge enqueue several "AAA" updates WITHOUT pumping, so
+	// metacalls referencing the first module's slot pile up in the event queue.
+	std::this_thread::sleep_for(50ms);
+
+	// Reconfiguring tears down the first slot; the queued "AAA" metacalls must be
+	// discarded here. The second module only ever emits "BBB", so the first script's
+	// output reaching the display can only happen via an un-flushed stale metacall.
+	out.setModules( QVariantList{ timedEntry(second.path) } );
+
+	bool sawFirstScriptOutput = false;
+	QObject::connect(&out, &PSSspace::ScriptOutput::textChanged, [&]{
+		if (out.text().toStdString().find("AAA") != std::string::npos) {
+			sawFirstScriptOutput = true;
+		}
+	});
+
+	REQUIRE( pumpUntil([&]{ return out.text().toStdString() == "BBB"; }, 5s) );
+	REQUIRE_FALSE( sawFirstScriptOutput ); // no stale "AAA" ever surfaced
+}
+
 TEST_CASE("ScriptOutput.setModules with an empty list clears the text", "[ScriptOutput]") {
 	const TempScript script("pss_so_clear.sh", "printf 'transient'\n");
 	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
@@ -322,4 +354,25 @@ TEST_CASE("ScriptOutput.setModules runs a signal module via its RTMIN offset", "
 	raise(SIGRTMIN + signalOffset); // setModules maps the offset to this raw signal
 	REQUIRE( pumpUntil([&]{ return !out.text().isEmpty(); }, 5s) );
 	REQUIRE_THAT( out.text().toStdString(), Catch::Matchers::ContainsSubstring("set signal") );
+}
+
+TEST_CASE("ScriptOutput.setModules skips a signal entry whose offset is out of range", "[ScriptOutput]") {
+	// signalOffset reaches setModules from a hand-editable config string and from a
+	// directly callable Q_INVOKABLE, neither bounded by the UI spinbox. An offset
+	// resolving outside [SIGRTMIN, SIGRTMAX] must be dropped, not used to index the
+	// _NSIG-sized signal table (gSignalFired) — an OOB the Test build's ASan traps.
+	const TempScript timed("pss_so_badsig_t.sh", "printf 'TMD'\n");
+	const TempScript signaled("pss_so_badsig_s.sh", "printf 'SIG'\n");
+	PSSspace::ScriptOutput out{ std::vector<PSSspace::ModuleSpec>{} };
+
+	// Far above SIGRTMAX, and (via a large negative offset) below 0 — both invalid.
+	out.setModules( QVariantList{
+		timedEntry(timed.path, 60),
+		signalEntry(signaled.path, 1000),
+		signalEntry(signaled.path, -1000) } );
+
+	// Only the timed module survives. Its fragment shows with NO trailing delimiter,
+	// proving the signal entries were dropped rather than spawned-but-idle (which
+	// would render "TMD | " for the first, plus another " | " for the second).
+	REQUIRE( pumpUntil([&]{ return out.text().toStdString() == "TMD"; }, 5s) );
 }

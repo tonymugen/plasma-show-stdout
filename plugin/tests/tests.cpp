@@ -79,6 +79,17 @@ TEST_CASE("runScript non-executable file", "[runScript]") {
 	REQUIRE_THAT( result, !Catch::Matchers::ContainsSubstring("should not appear") );
 }
 
+TEST_CASE("runScript stops at an embedded NUL byte", "[runScript]") {
+	// Output is assembled with `output += buffer` (the const char* overload), which
+	// stops at the first NUL. UTF-8 never contains a NUL, so this is harmless for the
+	// intended use, but a script emitting binary data has its line cut at the NUL.
+	// This pins down (rather than endorses) that behavior.
+	const TempScript script("pss_nul.sh", "printf 'abc\\0def'\n");
+	const std::string result = PSSspace::runScript(script.path);
+	REQUIRE_THAT( result, Catch::Matchers::ContainsSubstring("abc") );
+	REQUIRE_THAT( result, !Catch::Matchers::ContainsSubstring("def") );
+}
+
 /*
  * truncateUtf8
  */
@@ -137,6 +148,44 @@ TEST_CASE("truncateUtf8 handles a 4-byte codepoint", "[truncateUtf8]") {
 	std::string out = "ab" + grin + "cd";
 	PSSspace::truncateUtf8(out, 3);
 	REQUIRE( out == "ab" + grin );     // 'a','b', full emoji = 3 codepoints, 6 bytes
+}
+
+TEST_CASE("truncateUtf8 leaves an empty string empty", "[truncateUtf8]") {
+	// the fast path (size <= limit) must hold at the 0 == 0 boundary too
+	std::string zeroLimit;
+	PSSspace::truncateUtf8(zeroLimit, 0);
+	REQUIRE( zeroLimit.empty() );
+
+	std::string roomy;
+	PSSspace::truncateUtf8(roomy, 5);
+	REQUIRE( roomy.empty() );
+}
+
+TEST_CASE("truncateUtf8 keeps a truncated trailing sequence whole", "[truncateUtf8]") {
+	// A lead byte near the end can claim more bytes than remain (corrupt/clipped
+	// input). The cursor then overshoots the end; the function must NOT erase past
+	// it. This guards the `if (byteIndex < size)` check that keeps the final erase
+	// in bounds — without it the erase would build an iterator past end() (UB).
+	std::string clipped = "abc\xF0\x9F";   // 'a','b','c' + a 4-byte lead with only 1 of 3
+	PSSspace::truncateUtf8(clipped, 4);    // 4th "codepoint" overruns the buffer end
+	REQUIRE( clipped == "abc\xF0\x9F" );   // unchanged: the malformed tail is kept whole
+}
+
+TEST_CASE("truncateUtf8 counts stray continuation bytes as one codepoint each", "[truncateUtf8]") {
+	// 0x80–0xBF are continuation bytes with no lead; the decoder must treat each as a
+	// single codepoint so it always makes progress (never hangs, never over-consumes).
+	std::string strays = "\x80\x80X";      // two stray continuation bytes, then 'X'
+	PSSspace::truncateUtf8(strays, 2);
+	REQUIRE( strays == "\x80\x80" );       // each stray = 1 codepoint; cut after the second
+}
+
+TEST_CASE("truncateUtf8 counts an invalid lead byte as one codepoint", "[truncateUtf8]") {
+	// 0xF8–0xFF are not valid UTF-8 lead bytes (they fall through to the else branch);
+	// each must advance the cursor by exactly one byte rather than mis-decode a run.
+	std::string invalid = "\xFF" "ab";     // 0xFF (invalid), then 'a','b' (split literal:
+	                                       // \x is greedy and would eat the hex digits 'a','b')
+	PSSspace::truncateUtf8(invalid, 2);
+	REQUIRE( invalid == "\xFF" "a" );      // 0xFF = 1 codepoint, 'a' = 1 codepoint, drop 'b'
 }
 
 /*

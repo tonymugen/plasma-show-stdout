@@ -270,6 +270,17 @@ void PSSspace::ScriptOutput::stopModules_() {
 		sem_destroy(&gTriggerSemaphore);
 	}
 
+	// Drop any bridge updates still queued on this object's event loop. Each was
+	// posted with QMetaObject::invokeMethod(Qt::QueuedConnection) capturing a raw
+	// ModuleSlot* into slots_; joining the bridge threads above stops new posts but
+	// does NOT flush ones already enqueued. On the destructor path Qt purges them
+	// for us, but on the setModules reconfigure path this object stays alive, so a
+	// stale metacall would dereference a slot we are about to clear (use-after-free)
+	// — or, after startModules_ repopulates the deque, write to the wrong slot.
+	// Removing them here, after the threads are joined and before slots_.clear(),
+	// closes that window; the fresh modules re-post their own updates.
+	QCoreApplication::removePostedEvents(this);
+
 	// Reset for reuse: a subsequent startModules_ rebuilds from scratch.
 	slots_.clear();
 	signalsActive_ = false;
@@ -387,7 +398,17 @@ void PSSspace::ScriptOutput::setModules(const QVariantList &specs) {
 				static_cast<uint32_t>(map.value(QStringLiteral("interval")).toInt()) };
 		} else {
 			// the config stores an RTMIN offset; the raw signal is glibc-runtime
-			spec.signalNumber = SIGRTMIN + map.value(QStringLiteral("signalOffset")).toInt();
+			const int signalNumber = SIGRTMIN + map.value(QStringLiteral("signalOffset")).toInt();
+			// Bounds-check before trusting it: signalNumber indexes gSignalFired
+			// (sized _NSIG) in startModules_/signalWaitLoop_ and is passed to
+			// sigaction. An out-of-range offset — from a hand-edited config string
+			// or a direct setModules call, neither bounded by the UI spinbox —
+			// would otherwise index the table out of bounds (memory corruption).
+			// Skip such an entry, consistent with how an empty script is dropped.
+			if (signalNumber < SIGRTMIN || signalNumber > SIGRTMAX) {
+				continue;
+			}
+			spec.signalNumber = signalNumber;
 		}
 		parsed.push_back( std::move(spec) );
 	}
