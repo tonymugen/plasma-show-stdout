@@ -37,5 +37,22 @@
             <label>Font family used to display script output.</label>
             <default>monospace</default>
         </entry>
+        <!--
+            Point size of the displayed output. 0 means "use the theme's default
+            font size" so an unconfigured widget looks exactly as before.
+        -->
+        <entry name="fontSize" type="Int">
+            <label>Point size used to display script output (0 = theme default).</label>
+            <default>0</default>
+        </entry>
+        <!-- Render the output in bold / italic (font "style"). -->
+        <entry name="fontBold" type="Bool">
+            <label>Display script output in bold.</label>
+            <default>false</default>
+        </entry>
+        <entry name="fontItalic" type="Bool">
+            <label>Display script output in italic.</label>
+            <default>false</default>
+        </entry>
     </group>
 </kcfg>

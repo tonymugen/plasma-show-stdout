@@ -22,6 +22,12 @@ KCM.SimpleKCM {
     // Font family for the displayed output (empty/"monospace" = generic fixed-width).
     property alias cfg_fontFamily: fontField.text
 
+    // Point size (0 = theme default) and bold/italic style of the displayed output.
+    // Plain scalars, so the standard cfg_<key> alias to each control persists them.
+    property alias cfg_fontSize: fontSizeSpin.value
+    property alias cfg_fontBold: boldCheck.checked
+    property alias cfg_fontItalic: italicCheck.checked
+
     // A module-less probe, used to read maxSignalOffset (SIGRTMAX - SIGRTMIN) for
     // the signal spinboxes' range and hostPid for the trigger hint. It spawns no
     // threads and touches no global signal state, so it is safe alongside the
@@ -121,8 +127,42 @@ KCM.SimpleKCM {
             QQC2.Button {
                 text: i18n("Choose…")
                 icon.name: "preferences-desktop-font"
-                onClicked: fontDialog.open()
+                // Seed the picker from the current family/size/style so it opens on
+                // the active font, then apply every chosen attribute on accept.
+                onClicked: {
+                    fontDialog.selectedFont = Qt.font({
+                        family: fontField.text.length > 0 ? fontField.text : "monospace",
+                        pointSize: fontSizeSpin.value > 0 ? fontSizeSpin.value
+                                                          : Kirigami.Theme.defaultFont.pointSize,
+                        bold: boldCheck.checked,
+                        italic: italicCheck.checked
+                    });
+                    fontDialog.open();
+                }
             }
+        }
+
+        // Size (point) and style (bold/italic) of the display font. The font picker
+        // above writes these too; the inline controls let the user tweak them
+        // directly. 0 size keeps the theme's default point size.
+        RowLayout {
+            Layout.fillWidth: true
+            QQC2.Label { text: i18n("Font size (pt, 0 = default):") }
+            QQC2.SpinBox {
+                id: fontSizeSpin
+                from: 0
+                to: 144
+                editable: true
+            }
+            QQC2.CheckBox {
+                id: boldCheck
+                text: i18n("Bold")
+            }
+            QQC2.CheckBox {
+                id: italicCheck
+                text: i18n("Italic")
+            }
+            Item { Layout.fillWidth: true }
         }
         QQC2.Label {
             Layout.fillWidth: true
@@ -131,6 +171,10 @@ KCM.SimpleKCM {
             // glyphs (shown as tofu/boxes) are immediately visible
             text: i18n("Preview:") + "  AaBb 0123  é ñ ✓ ★ ⚙ ░▒▓ │┤"
             font.family: fontField.text.length > 0 ? fontField.text : "monospace"
+            font.pointSize: fontSizeSpin.value > 0 ? fontSizeSpin.value
+                                                   : Kirigami.Theme.defaultFont.pointSize
+            font.bold: boldCheck.checked
+            font.italic: italicCheck.checked
             opacity: 0.8
             elide: Text.ElideRight
         }
@@ -307,7 +351,15 @@ KCM.SimpleKCM {
     Dialogs.FontDialog {
         id: fontDialog
         title: i18n("Select a display font")
-        // we only use the family; size/style are controlled by the layout
-        onAccepted: fontField.text = selectedFont.family
+        // Apply every attribute the user chose. Writing through the aliased controls
+        // marks the page dirty (so Apply enables) and updates the live preview.
+        onAccepted: {
+            fontField.text = selectedFont.family;
+            if (selectedFont.pointSize > 0) {
+                fontSizeSpin.value = Math.round(selectedFont.pointSize);
+            }
+            boldCheck.checked = selectedFont.bold;
+            italicCheck.checked = selectedFont.italic;
+        }
     }
 }

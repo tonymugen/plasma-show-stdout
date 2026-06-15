@@ -1,7 +1,7 @@
 # SOME DESCRIPTIVE TITLE.
-# Copyright (C) 2026 Anthony J. Greenberg
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the plasma_applet_com.github.tonymugen.plasma-show-stdout package.
-# Anthony J. Greenberg <info@bayesicresearch.org> 2026.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 #
 #, fuzzy
 msgid ""
@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: plasma_applet_com.github.tonymugen.plasma-show-stdout\n"
 "Report-Msgid-Bugs-To: https://github.com/tonymugen/plasma-show-stdout/"
 "issues\n"
-"POT-Creation-Date: 2026-06-04 14:12-0400\n"
+"POT-Creation-Date: 2026-06-15 16:16-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -23,107 +23,122 @@ msgstr ""
 msgid "General"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:103
+#: package/contents/ui/configGeneral.qml:109
 #, kde-format
 msgid "Delimiter between outputs:"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:107
+#: package/contents/ui/configGeneral.qml:113
 #, kde-format
 msgid "e.g. \" | \" (spaces count)"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:115
+#: package/contents/ui/configGeneral.qml:121
 #, kde-format
 msgid "Display font:"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:119
+#: package/contents/ui/configGeneral.qml:125
 #, kde-format
 msgid "e.g. MesloLGS Nerd Font Mono (blank = monospace)"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:122
+#: package/contents/ui/configGeneral.qml:128
 #, kde-format
 msgid "Choose…"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:132
+#: package/contents/ui/configGeneral.qml:150
+#, kde-format
+msgid "Font size (pt, 0 = default):"
+msgstr ""
+
+#: package/contents/ui/configGeneral.qml:159
+#, kde-format
+msgid "Bold"
+msgstr ""
+
+#: package/contents/ui/configGeneral.qml:163
+#, kde-format
+msgid "Italic"
+msgstr ""
+
+#: package/contents/ui/configGeneral.qml:172
 #, kde-format
 msgid "Preview:"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:161
+#: package/contents/ui/configGeneral.qml:205
 #, kde-format
 msgid "Script %1"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:166
+#: package/contents/ui/configGeneral.qml:210
 #, kde-format
 msgid "Remove"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:181
+#: package/contents/ui/configGeneral.qml:225
 #, kde-format
 msgid "Absolute path to a script"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:189
+#: package/contents/ui/configGeneral.qml:233
 #, kde-format
 msgid "Browse…"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:200
+#: package/contents/ui/configGeneral.qml:244
 #, kde-format
 msgid "Trigger:"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:205
+#: package/contents/ui/configGeneral.qml:249
 #, kde-format
 msgid "Timed (poll on an interval)"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:206
+#: package/contents/ui/configGeneral.qml:250
 #, kde-format
 msgid "Signal (run on SIGRTMIN+N)"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:218
+#: package/contents/ui/configGeneral.qml:262
 #, kde-format
 msgid "Interval (seconds):"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:238
+#: package/contents/ui/configGeneral.qml:282
 #, kde-format
 msgid "Signal offset (RTMIN+N):"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:256
+#: package/contents/ui/configGeneral.qml:300
 #, kde-format
 msgid "Trigger with: pkill --signal RTMIN+%1 %2"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:267
+#: package/contents/ui/configGeneral.qml:311
 #, kde-format
 msgid "Output limit (characters):"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:285
+#: package/contents/ui/configGeneral.qml:329
 #, kde-format
 msgid "Add script"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:293
+#: package/contents/ui/configGeneral.qml:337
 #, kde-format
 msgid "Select a script"
 msgstr ""
 
-#: package/contents/ui/configGeneral.qml:309
+#: package/contents/ui/configGeneral.qml:353
 #, kde-format
 msgid "Select a display font"
 msgstr ""
 
-#: package/contents/ui/main.qml:86 package/contents/ui/main.qml:138
+#: package/contents/ui/main.qml:86 package/contents/ui/main.qml:143
 #, kde-format
 msgid "Add scripts"
 msgstr ""

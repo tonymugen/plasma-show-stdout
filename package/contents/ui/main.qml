@@ -102,6 +102,11 @@ PlasmoidItem {
 			text: compactRoot.displayText
 			opacity: root.scriptCount > 0 ? 1.0 : 0.6
 			font.family: Plasmoid.configuration.fontFamily || "monospace"
+			// 0 = keep the theme's default point size (prior behaviour).
+			font.pointSize: Plasmoid.configuration.fontSize > 0
+				? Plasmoid.configuration.fontSize : Kirigami.Theme.defaultFont.pointSize
+			font.bold: Plasmoid.configuration.fontBold
+			font.italic: Plasmoid.configuration.fontItalic
 			horizontalAlignment: Text.AlignHCenter
 			verticalAlignment: Text.AlignVCenter
 			maximumLineCount: 1
@@ -139,7 +144,12 @@ PlasmoidItem {
 				color: Kirigami.Theme.textColor
 				opacity: root.scriptCount > 0 ? 1.0 : 0.6
 				font.family: Plasmoid.configuration.fontFamily || "monospace"
-				font.italic: root.scriptCount === 0
+				// 0 = keep the theme's default point size (prior behaviour).
+				font.pointSize: Plasmoid.configuration.fontSize > 0
+					? Plasmoid.configuration.fontSize : Kirigami.Theme.defaultFont.pointSize
+				font.bold: Plasmoid.configuration.fontBold
+				// the placeholder prompt is always italic; otherwise honour config
+				font.italic: root.scriptCount === 0 || Plasmoid.configuration.fontItalic
 				wrapMode: Text.WordWrap
 			}
 		}
